@@ -1,0 +1,27 @@
+app:
+  name: aether
+  environment: development
+
+scheduler:
+  workers: 4
+  retry_limit: 3
+
+adapters:
+  gemini:
+    command: "gemini"
+    timeout_seconds: 120
+  claude:
+    command: "claude-code"
+    timeout_seconds: 120
+
+policy:
+  allow_file_write: true
+  allow_git_push: false
+  allow_shell_exec: false
+
+memory:
+  backend: sqlite
+  path: "./aether.db"
+
+observability:
+  log_level: "info"
