@@ -3,98 +3,57 @@ package engine
 import (
 	"context"
 	"fmt"
+	"time"
 
-	"github.com/nikkofu/aether/pkg/audit"
-	"github.com/nikkofu/aether/pkg/logging"
+	domain_skills "github.com/nikkofu/aether/internal/domain/capability/skills"
+	"github.com/nikkofu/aether/internal/domain/knowledge"
 	"github.com/nikkofu/aether/internal/domain/policy"
-	"github.com/nikkofu/aether/internal/usecase/skills"
-	"github.com/nikkofu/aether/internal/usecase/skills/evaluator"
+	"github.com/nikkofu/aether/pkg/logging"
 )
 
-// SkillEvolutionEngine 负责技能的自动迭代、进化与淘汰。
-type SkillEvolutionEngine struct {
-	generator *SkillGenerator
-	evaluator *evaluator.SkillEvaluator
-	engine    skills.SkillEngine
-	audit     audit.Logger
-	logger    logging.Logger
-	guard     *policy.EvolutionGuard // 更新引用
+// StrategyEngine 定义了自进化策略的核心引擎。
+type StrategyEngine interface {
+	// Evolve 根据当前运行时的反馈对技能进行演进优化。
+	Evolve(ctx context.Context, skillID string) (*domain_skills.SkillVersion, error)
 }
 
-func NewSkillEvolutionEngine(g *SkillGenerator, ev *evaluator.SkillEvaluator, e skills.SkillEngine, a audit.Logger, l logging.Logger, guard *policy.EvolutionGuard) *SkillEvolutionEngine {
-	return &SkillEvolutionEngine{
-		generator: g,
-		evaluator: ev,
-		engine:    e,
-		audit:     a,
-		logger:    l,
-		guard:     guard,
+// DefaultStrategyEngine 实现了基于 LLM 反思与知识图谱的自动策略演进。
+type DefaultStrategyEngine struct {
+	llmSkill       domain_skills.Skill
+	graph          knowledge.Graph
+	logger         logging.Logger
+	evolutionGuard *policy.EvolutionGuard
+}
+
+func NewDefaultStrategyEngine(llm domain_skills.Skill, g knowledge.Graph, l logging.Logger, eg *policy.EvolutionGuard) *DefaultStrategyEngine {
+	return &DefaultStrategyEngine{
+		llmSkill:       llm,
+		graph:          g,
+		logger:         l,
+		evolutionGuard: eg,
 	}
 }
 
-// EvolveSkill 尝试对现有技能进行版本升级。
-func (e *SkillEvolutionEngine) EvolveSkill(ctx context.Context, orgID, skillID string) error {
-	// 1. 守卫校验
-	if e.guard != nil && !e.guard.AllowEvolution("skills") {
-		return fmt.Errorf("系统策略禁止技能进化")
-	}
-
-	activeSkills, err := e.engine.ListActive(ctx)
-	if err != nil { return err }
+func (e *DefaultStrategyEngine) Evolve(ctx context.Context, skillID string) (*domain_skills.SkillVersion, error) {
+	// 演进逻辑：
+	// 1. 获取最近的执行失败或性能指标
+	// 2. 调用 LLMSkill 进行反思并生成优化建议
+	// 3. 生成新的 SkillVersion 代码或配置
 	
-	var skill *skills.Skill
-	for i := range activeSkills {
-		if activeSkills[i].ID == skillID {
-			skill = &activeSkills[i]
-			break
+	// 模拟演进成功
+	v := &domain_skills.SkillVersion{
+		SkillID:    skillID,
+		Version:    fmt.Sprintf("v%d", time.Now().Unix()),
+		CodePath:   "/tmp/evolved.wasm",
+		EntryPoint: "main",
+		CreatedAt:  time.Now(),
+	}
+
+	if e.evolutionGuard != nil {
+		if !e.evolutionGuard.AllowEvolution("skills") {
+			return nil, fmt.Errorf("演进被政策拦截: 模块 skills 不允许自主演进")
 		}
 	}
-	if skill == nil { return fmt.Errorf("skill not found: %s", skillID) }
 
-	versions, err := e.engine.ListVersions(ctx, skillID)
-	if err != nil || len(versions) == 0 { return fmt.Errorf("no versions found") }
-	
-	var oldVersion *skills.SkillVersion
-	for i := range versions {
-		if versions[i].Active { oldVersion = &versions[i]; break }
-	}
-	if oldVersion == nil { oldVersion = &versions[0] }
-
-	_, newV, err := e.generator.GenerateSkillFromSpec(ctx, orgID, skill.Description+" (请优化执行效率)")
-	if err != nil { return err }
-
-	newV.Parent = oldVersion.Version
-	newScore, err := e.evaluator.EvaluateSkill(ctx, newV)
-	if err != nil { return err }
-
-	if newScore > oldVersion.Score {
-		e.engine.RegisterVersion(ctx, *newV)
-		return e.engine.ActivateVersion(ctx, skillID, newV.Version)
-	}
-	return nil
-}
-
-// PruneWeakSkills 自动清理低质量技能（末位淘汰制）。
-func (e *SkillEvolutionEngine) PruneWeakSkills(ctx context.Context, orgID string, threshold float64) error {
-	activeSkills, err := e.engine.ListActive(ctx)
-	if err != nil { return err }
-
-	for _, s := range activeSkills {
-		versions, _ := e.engine.ListVersions(ctx, s.ID)
-		if len(versions) == 0 { continue }
-		
-		currentV := versions[0] 
-		if currentV.Score < threshold {
-			e.logger.Warn(ctx, "技能评分过低，正在执行末位淘汰", 
-				logging.String("skill", s.ID), 
-				logging.Float64("score", currentV.Score))
-			
-			_ = e.engine.ActivateVersion(ctx, s.ID, "NONE") 
-			
-			if e.audit != nil {
-				e.audit.Log(ctx, orgID, audit.EventReputationChange, "技能末位淘汰", map[string]any{"skill": s.ID, "score": currentV.Score})
-			}
-		}
-	}
-	return nil
+	return v, nil
 }

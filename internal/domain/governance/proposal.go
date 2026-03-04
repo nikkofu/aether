@@ -9,6 +9,7 @@ import (
 	"github.com/nikkofu/aether/pkg/audit"
 	"github.com/nikkofu/aether/internal/domain/economy"
 	"github.com/nikkofu/aether/internal/domain/governance/constitution"
+	"github.com/nikkofu/aether/internal/domain/policy"
 	"github.com/nikkofu/aether/pkg/logging"
 	"github.com/nikkofu/aether/pkg/security/rbac"
 )
@@ -34,6 +35,7 @@ type GovernanceBoard struct {
 	mu           sync.RWMutex
 	ledger       economy.Ledger
 	constitution constitution.Constitution
+	policy       policy.Policy
 	rbac         rbac.RBAC
 	audit        audit.Logger
 	lock         *GovernanceLock
@@ -41,10 +43,11 @@ type GovernanceBoard struct {
 	proposals    map[string]*PolicyProposal
 }
 
-func NewGovernanceBoard(l economy.Ledger, c constitution.Constitution, r rbac.RBAC, a audit.Logger, lock *GovernanceLock, log logging.Logger) *GovernanceBoard {
+func NewGovernanceBoard(l economy.Ledger, c constitution.Constitution, p policy.Policy, r rbac.RBAC, a audit.Logger, lock *GovernanceLock, log logging.Logger) *GovernanceBoard {
 	return &GovernanceBoard{
 		ledger:       l,
 		constitution: c,
+		policy:       p,
 		rbac:         r,
 		audit:        a,
 		lock:         lock,
@@ -145,6 +148,15 @@ func (b *GovernanceBoard) Tally(ctx context.Context, proposalID string) (bool, e
 	p.Status = "passed"
 	b.mu.Unlock()
 	b.audit.Log(ctx, p.OrgID, audit.EventProposalPassed, "提案通过", map[string]any{"id": p.ID})
+
+	// 自动执行：如果是政策变更提案，则直接更新 Policy Engine
+	if p.PolicyType == "policy_change" {
+		if b.policy != nil {
+			ruleName, _ := p.Proposal, "" // 假设 Proposal 字段存储规则名或从元数据解析
+			b.policy.UpdateRule(ctx, ruleName, p.NewValue)
+			b.audit.Log(ctx, p.OrgID, "policy_updated", "提案通过并自动更新政策", map[string]any{"rule": ruleName, "value": p.NewValue})
+		}
+	}
 
 	return true, nil
 }

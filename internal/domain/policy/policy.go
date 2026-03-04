@@ -33,23 +33,36 @@ type EvaluationContext struct {
 type Policy interface {
 	// Evaluate 根据给定的上下文执行策略检查并返回决策。
 	Evaluate(ctx context.Context, evalCtx EvaluationContext) (Decision, error)
+	// UpdateRule 动态更新或添加策略规则。
+	UpdateRule(ctx context.Context, ruleName string, value any) error
 }
 
 // DefaultPolicy 实现了 Aether 默认的安全评估策略。
-type DefaultPolicy struct{}
+type DefaultPolicy struct {
+	rules map[string]any
+}
 
 // NewDefaultPolicy 创建并返回一个新的 DefaultPolicy 实例。
 func NewDefaultPolicy() *DefaultPolicy {
-	return &DefaultPolicy{}
+	return &DefaultPolicy{
+		rules: make(map[string]any),
+	}
+}
+
+func (p *DefaultPolicy) UpdateRule(ctx context.Context, ruleName string, value any) error {
+	p.rules[ruleName] = value
+	return nil
 }
 
 // Evaluate 执行默认的策略检查逻辑。
-// 规则：
-// 1. 默认允许 "llm" 技能。
-// 2. 包含 "shell" 的技能名将被拒绝 (Deny)。
-// 3. 包含 "git" 的技能名将需要审批 (RequireApproval)。
 func (p *DefaultPolicy) Evaluate(ctx context.Context, evalCtx EvaluationContext) (Decision, error) {
+	// 优先检查动态规则
+	if decision, ok := p.rules["skill:"+evalCtx.Skill].(string); ok {
+		return Decision(decision), nil
+	}
+
 	skillLower := strings.ToLower(evalCtx.Skill)
+
 
 	// 规则 2: Shell 注入风险高，默认拒绝
 	if strings.Contains(skillLower, "shell") {

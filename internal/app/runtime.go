@@ -193,7 +193,7 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 		alm, _ := cap_alarm.NewAlarmCapability(db)
 		r.capabilityGateway.Register(alm)
 
-		r.governanceBoard = governance.NewGovernanceBoard(r.ledger, r.constitution, r.rbac, r.audit, r.govLock, r.logger)
+		r.governanceBoard = governance.NewGovernanceBoard(r.ledger, r.constitution, r.policy, r.rbac, r.audit, r.govLock, r.logger)
 		r.sysScheduler = sys_scheduler.NewSystemScheduler(r.ledger, r.logger)
 		r.riskGuard = risk.NewRiskGuard(r.ledger, 100000.0, 0.4, 0.2)
 

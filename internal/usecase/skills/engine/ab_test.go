@@ -4,6 +4,8 @@ import (
 	"context"
 	"math/rand"
 	"time"
+
+	domain_skills "github.com/nikkofu/aether/internal/domain/capability/skills"
 )
 
 // ABTestResult 记录单次测试的统计数据。
@@ -13,8 +15,16 @@ type ABTestResult struct {
 	TotalCost    float64
 }
 
+type ABTester struct {
+	engine domain_skills.SkillEngine
+}
+
+func NewABTester(e domain_skills.SkillEngine) *ABTester {
+	return &ABTester{engine: e}
+}
+
 // RunABTest 在两个技能版本间执行性能对比测试。
-func (e *SkillEvolutionEngine) RunABTest(ctx context.Context, skillAID, skillBID string, sampleSize int) (string, error) {
+func (t *ABTester) RunABTest(ctx context.Context, skillAID, skillBID string, sampleSize int) (string, error) {
 	// 1. 准备测试样本 (实际应从 reflection.Store 获取)
 	samples := []map[string]any{
 		{"input": "test_1"}, {"input": "test_2"}, {"input": "test_3"},
@@ -29,7 +39,7 @@ func (e *SkillEvolutionEngine) RunABTest(ctx context.Context, skillAID, skillBID
 
 		// 测试 A
 		startA := time.Now()
-		outA, errA := e.engine.Execute(ctx, skillAID, sample)
+		outA, errA := t.engine.Execute(ctx, skillAID, sample)
 		if errA == nil {
 			statsA.SuccessCount++
 			statsA.TotalTime += time.Since(startA)
@@ -39,7 +49,7 @@ func (e *SkillEvolutionEngine) RunABTest(ctx context.Context, skillAID, skillBID
 
 		// 测试 B
 		startB := time.Now()
-		outB, errB := e.engine.Execute(ctx, skillBID, sample)
+		outB, errB := t.engine.Execute(ctx, skillBID, sample)
 		if errB == nil {
 			statsB.SuccessCount++
 			statsB.TotalTime += time.Since(startB)
