@@ -39,6 +39,18 @@ type DefaultAgentManager struct {
 	totalSpawns     int64
 	totalFailures   int64
 	taskSpawns      map[string]int
+
+	scheduler       Scheduler
+}
+
+type Scheduler interface {
+	SelectWorker(ctx context.Context, role string) string
+}
+
+func (m *DefaultAgentManager) SetScheduler(s Scheduler) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scheduler = s
 }
 
 func NewDefaultAgentManager(llm capability.Capability, t observability.Tracer, l logging.Logger, b Bus, g knowledge.Graph, maxSpawn, maxConn int, te *trace.TraceEngine) *DefaultAgentManager {
@@ -115,6 +127,29 @@ func (m *DefaultAgentManager) Spawn(ctx context.Context, role string, payload ma
 		m.taskSpawns[taskID]++
 	}
 	m.mu.Unlock()
+
+	m.mu.RLock()
+	scheduler := m.scheduler
+	m.mu.RUnlock()
+
+	if scheduler != nil {
+		workerID := scheduler.SelectWorker(ctx, role)
+		if workerID != "" && workerID != "local" {
+			// 发布远程创建消息
+			m.bus.Publish(ctx, Message{
+				From: "manager",
+				To:   workerID,
+				Type: "system.spawn",
+				Payload: map[string]any{
+					"role":    role,
+					"payload": payload,
+				},
+			})
+			// 返回一个代表远程代理的 Mock 或在此处结束
+			// 为了保持接口一致，这里可能需要一个 ProxyAgent 或者异步处理
+			// 暂时假设本地创建作为回退或目前只处理本地
+		}
+	}
 
 	m.mu.RLock()
 	factory, ok := m.roleFactories[role]

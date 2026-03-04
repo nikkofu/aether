@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nikkofu/aether/internal/agent"
+	"github.com/nikkofu/aether/internal/bus"
 	"github.com/nikkofu/aether/internal/economy"
 	"github.com/nikkofu/aether/internal/logging"
 	"github.com/nikkofu/aether/internal/risk"
@@ -33,12 +35,49 @@ func NewScheduler(l logging.Logger, ledger economy.Ledger, guard *risk.RiskGuard
 	}
 }
 
+func (s *Scheduler) Start(ctx context.Context, b bus.Bus) {
+	// 订阅来自所有 worker 的心跳
+	b.SubscribeToSubject(ctx, "leader", func(msg agent.Message) {
+		if msg.Type == "heartbeat" {
+			role, _ := msg.Payload["role"].(string)
+			workerID, _ := msg.Payload["worker_id"].(string)
+			if role != "" && workerID != "" {
+				s.RegisterHeartbeat(role, workerID)
+			}
+		}
+	})
+
+	// 启动定期检查超时 worker 的协程
+	ticker := time.NewTicker(5 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.CheckTimeouts(15 * time.Second)
+			}
+		}
+	}()
+
+	if s.logger != nil {
+		s.logger.Info(ctx, "集群调度器已启动")
+	}
+}
+
 func (s *Scheduler) RegisterHeartbeat(role, workerID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	
+	_, exists := s.lastSeen[workerID]
 	s.lastSeen[workerID] = time.Now()
-	if _, exists := s.lastSeen[workerID]; !exists {
+	
+	if !exists {
 		s.workers[role] = append(s.workers[role], workerID)
+		if s.logger != nil {
+			s.logger.Info(context.Background(), "新工作节点已注册", logging.String("worker_id", workerID), logging.String("role", role))
+		}
 	}
 }
 

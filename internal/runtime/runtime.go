@@ -91,6 +91,9 @@ type Runtime struct {
 	// 追踪引擎
 	traceEngine     *trace.TraceEngine
 
+	// 调度器
+	scheduler       *cluster.Scheduler
+
 	// 能力网关
 	capabilityGateway capabilities.Gateway
 	wasmExecutor      *skill_sandbox.WASMExecutor
@@ -111,12 +114,20 @@ func (r *Runtime) StrategicStore() strategic.Store { return r.strategicStore }
 func (r *Runtime) StrategicEngine() *strategic.Engine { return r.strategicEngine }
 func (r *Runtime) CapabilityGateway() capabilities.Gateway { return r.capabilityGateway }
 func (r *Runtime) WASMExecutor() *skill_sandbox.WASMExecutor { return r.wasmExecutor }
+func (r *Runtime) Scheduler() *cluster.Scheduler { return r.scheduler }
 
 func NewRuntime(cfg *config.Config) *Runtime {
 	t := observability.NewConsoleRenderer()
 	logFormat := "console"
 	if os.Getenv("AETHER_LOG_FORMAT") == "json" { logFormat = "json" }
 	l, _ := logging.NewLogger(logging.Config{Level: cfg.Log.Level, Format: logFormat})
+
+	var b bus.Bus
+	if cfg.Runtime.NATSURL != "" {
+		b, _ = bus.NewNATSBus(cfg.Runtime.NATSURL)
+	} else {
+		b = bus.NewMemoryBus(100)
+	}
 
 	return &Runtime{
 		cfg:        cfg,
@@ -127,7 +138,7 @@ func NewRuntime(cfg *config.Config) *Runtime {
 		router:     routing.NewDefaultRouter(nil, t),
 		tracer:     t,
 		logger:     l,
-		bus:        bus.NewMemoryBus(100),
+		bus:        b,
 		orgRegistry: org.NewInMemoryRegistry(),
 		govLock:    governance.NewGovernanceLock(),
 		evolutionGuard: policy.NewEvolutionGuard(),
@@ -185,6 +196,12 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 		r.governanceBoard = governance.NewGovernanceBoard(r.ledger, r.constitution, r.rbac, r.audit, r.govLock, r.logger)
 		r.sysScheduler = sys_scheduler.NewSystemScheduler(r.ledger, r.logger)
 		r.riskGuard = risk.NewRiskGuard(r.ledger, 100000.0, 0.4, 0.2)
+
+		// 初始化调度器
+		r.scheduler = cluster.NewScheduler(r.logger, r.ledger, r.riskGuard)
+		if cfg.App.Mode == "cluster-leader" {
+			r.scheduler.Start(context.Background(), r.bus)
+		}
 	}
 
 	r.RegisterAdapter(gemini.NewAdapterWithBinary(cfg.Runtime.GeminiCommand))
@@ -207,7 +224,9 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 
 	dm := agent.NewDefaultAgentManager(llmSkill, r.tracer, r.logger, r.bus, r.knowledgeGraph, cfg.Agent.MaxSpawnPerTask, cfg.Agent.MaxConcurrency, r.traceEngine)
 	dm.SetLearning(r.reflector, r.reflectionStore, r.learningEngine)
+	dm.SetScheduler(r.scheduler)
 	dm.RegisterRole("operational", func(ctx context.Context, name string, payload map[string]any) (agent.Agent, error) {
+
 		return org.NewOperationalWorkerAgent(name, "tactical_manager", llmSkill, r.reflector, r.ledger, r.wasmExecutor, r.traceEngine), nil
 	})
 	r.agentManager = dm
@@ -217,6 +236,22 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 	r.initOrgAgents()
 
 	if r.sysScheduler != nil { go r.sysScheduler.Start(context.Background()) }
+
+	// 如果是集群模式，启动心跳和相关的总线订阅
+	if cfg.App.Mode == "cluster-worker" {
+		cluster.StartWorkerHeartbeat(context.Background(), r.bus, cfg.App.Role, cfg.App.NodeID, r.logger)
+
+		// 订阅针对该节点的系统任务
+		r.bus.SubscribeToSubject(context.Background(), cfg.App.NodeID, func(msg agent.Message) {
+			if msg.Type == "system.spawn" {
+				role, _ := msg.Payload["role"].(string)
+				payload, _ := msg.Payload["payload"].(map[string]any)
+				if role != "" {
+					r.agentManager.Spawn(context.Background(), role, payload)
+				}
+			}
+		})
+	}
 
 	return r
 }

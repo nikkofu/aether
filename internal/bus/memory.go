@@ -11,12 +11,24 @@ import (
 	"github.com/nikkofu/aether/internal/logging"
 )
 
+type subjectSub struct {
+	subject string
+	handler func(msg agent.Message)
+}
+
 // MemoryBus 实现了具备故障恢复能力的内存消息总线。
 type MemoryBus struct {
-	mu          sync.RWMutex
-	subscribers []agent.Agent
-	queue       chan agent.Message
-	logger      logging.Logger
+	mu           sync.RWMutex
+	subscribers  []agent.Agent
+	subjectSubs  []subjectSub
+	queue        chan agent.Message
+	logger       logging.Logger
+}
+
+func (b *MemoryBus) SubscribeToSubject(ctx context.Context, subject string, handler func(msg agent.Message)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.subjectSubs = append(b.subjectSubs, subjectSub{subject: subject, handler: handler})
 }
 
 func NewMemoryBus(bufferSize int) *MemoryBus {
@@ -59,6 +71,12 @@ func (b *MemoryBus) Start(ctx context.Context) {
 func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
+
+	for _, sub := range b.subjectSubs {
+		if msg.To == sub.subject || sub.subject == "*" {
+			go sub.handler(msg)
+		}
+	}
 
 	for _, sub := range b.subscribers {
 		if msg.To != "" && msg.To != sub.Name() {

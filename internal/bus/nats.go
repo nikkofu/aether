@@ -53,6 +53,27 @@ func (b *NATSBus) Publish(ctx context.Context, msg agent.Message) {
 	_ = b.conn.Publish(subject, data)
 }
 
+func (b *NATSBus) SubscribeToSubject(ctx context.Context, subject string, handler func(msg agent.Message)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	natsSubject := fmt.Sprintf("aether.agent.%s", subject)
+	if subject == "*" {
+		natsSubject = "aether.agent.>"
+	}
+
+	h := func(m *nats.Msg) {
+		var msg agent.Message
+		if err := json.Unmarshal(m.Data, &msg); err != nil {
+			return
+		}
+		handler(msg)
+	}
+
+	sub, _ := b.conn.Subscribe(natsSubject, h)
+	b.subs = append(b.subs, sub)
+}
+
 func (b *NATSBus) Subscribe(a agent.Agent) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
