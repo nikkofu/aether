@@ -1,0 +1,13 @@
+nodes:
+  - id: plan
+    skill: llm
+    input:
+      adapter: gemini
+      prompt: "Design a simple REST API for a todo app"
+
+  - id: implement
+    skill: llm
+    depends_on: [plan]
+    input:
+      adapter: gemini
+      prompt: "Based on this plan:\n{{plan.output}}\nImplement in Go."
