@@ -11,7 +11,7 @@ import (
 	"github.com/nikkofu/aether/internal/infrastructure/llm"
 )
 
-// Adapter 实现 cli_adapters.Adapter 接口，用于调用本地 gemini CLI 命令。
+// Adapter 实现 llm.Adapter 接口，用于调用本地 gemini CLI 命令。
 type Adapter struct {
 	binaryPath string
 }
@@ -64,7 +64,7 @@ func (a *Adapter) Execute(ctx context.Context, prompt string) (string, error) {
 
 // Stream 实现流式输出。
 // 它通过 StdoutPipe 实时捕获输出，并使用 bufio.Scanner 按字符触发回调。
-func (a *Adapter) Stream(ctx context.Context, prompt string, onToken cli_adapters.TokenCallback) error {
+func (a *Adapter) Stream(ctx context.Context, prompt string, onToken llm.TokenCallback) error {
 	if prompt == "" {
 		return fmt.Errorf("prompt 不能为空")
 	}
@@ -129,5 +129,5 @@ func (a *Adapter) Stream(ctx context.Context, prompt string, onToken cli_adapter
 	return nil
 }
 
-// 确保 Adapter 结构体实现了 cli_adapters.Adapter 接口。
-var _ cli_adapters.Adapter = (*Adapter)(nil)
+// 确保 Adapter 结构体实现了 llm.Adapter 接口。
+var _ llm.Adapter = (*Adapter)(nil)

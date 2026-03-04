@@ -35,6 +35,13 @@ type Config struct {
 		Timeout     time.Duration `mapstructure:"timeout"`
 	} `mapstructure:"openai"`
 
+	Ollama struct {
+		BaseURL     string        `mapstructure:"base_url"`
+		Model       string        `mapstructure:"model"`
+		Temperature float64       `mapstructure:"temperature"`
+		Timeout     time.Duration `mapstructure:"timeout"`
+	} `mapstructure:"ollama"`
+
 	Log struct {
 		Level string `mapstructure:"level"`
 	} `mapstructure:"log"`
@@ -55,6 +62,12 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("openai.model", "gpt-4o")
 	v.SetDefault("openai.temperature", 0.7)
 	v.SetDefault("openai.timeout", 120*time.Second)
+	
+	v.SetDefault("ollama.base_url", "http://localhost:11434")
+	v.SetDefault("ollama.model", "llama3")
+	v.SetDefault("ollama.temperature", 0.7)
+	v.SetDefault("ollama.timeout", 300*time.Second)
+
 	v.SetDefault("log.level", "info")
 
 	// 2. 配置文件支持

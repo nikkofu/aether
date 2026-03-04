@@ -21,13 +21,13 @@ import (
 )
 
 type AdapterProvider interface {
-	GetAdapter(name string) (cli_adapters.Adapter, bool)
+	GetAdapter(name string) (llm.Adapter, bool)
 }
 
 // LLMSkill 是一个完全闭环的自进化能力实现。
 type LLMSkill struct {
 	name            string
-	defaultAdapter  cli_adapters.Adapter
+	defaultAdapter  llm.Adapter
 	adapterProvider AdapterProvider
 	router          routing.Router
 	tracker         metrics.Tracker
@@ -37,7 +37,7 @@ type LLMSkill struct {
 	defaultTemplate string
 }
 
-func NewLLMSkill(name string, defaultAdapter cli_adapters.Adapter, provider AdapterProvider, router routing.Router, tracker metrics.Tracker, tracer observability.Tracer, strategyStore strategy.StrategyStore, renderer capability.PromptRenderer, template string) *LLMSkill {
+func NewLLMSkill(name string, defaultAdapter llm.Adapter, provider AdapterProvider, router routing.Router, tracker metrics.Tracker, tracer observability.Tracer, strategyStore strategy.StrategyStore, renderer capability.PromptRenderer, template string) *LLMSkill {
 	if renderer == nil {
 		renderer = capability.NewDefaultRenderer()
 	}
@@ -123,7 +123,7 @@ func (s *LLMSkill) Execute(ctx context.Context, input map[string]any) (map[strin
 	return nil, fmt.Errorf("达到最大重试限制 (%d): %w", st.RetryLimit, lastErr)
 }
 
-func (s *LLMSkill) selectAdapter(ctx context.Context, prompt string, input map[string]any, st *strategy.Strategy) cli_adapters.Adapter {
+func (s *LLMSkill) selectAdapter(ctx context.Context, prompt string, input map[string]any, st *strategy.Strategy) llm.Adapter {
 	if name, ok := input["adapter"].(string); ok {
 		if a, ok := s.adapterProvider.GetAdapter(name); ok { return a }
 	}
@@ -138,7 +138,7 @@ func (s *LLMSkill) selectAdapter(ctx context.Context, prompt string, input map[s
 	return s.defaultAdapter
 }
 
-func (s *LLMSkill) callAdapter(ctx context.Context, adapter cli_adapters.Adapter, prompt string, input map[string]any) (map[string]any, error) {
+func (s *LLMSkill) callAdapter(ctx context.Context, adapter llm.Adapter, prompt string, input map[string]any) (map[string]any, error) {
 	var finalOutput string
 	var usage openai.Usage
 	streamEnabled, _ := input["stream"].(bool)

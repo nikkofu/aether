@@ -1,4 +1,4 @@
-package cli_adapters
+package llm
 
 import "context"
 

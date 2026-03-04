@@ -78,3 +78,30 @@ func (p *Pipeline) hasCycle(id string, adj map[string][]string, visited, recStac
 	recStack[id] = false
 	return false
 }
+
+// ToMermaid 将当前的 DAG 导出为 Mermaid.js 图表格式字符串。
+func (p *Pipeline) ToMermaid() string {
+	if len(p.Nodes) == 0 {
+		return "graph TD\n    Empty[No Nodes]"
+	}
+
+	var mermaid string
+	mermaid += "graph TD\n"
+	
+	// 渲染所有节点
+	for _, node := range p.Nodes {
+		// 为了视觉美观，将 Skill 加上方括号作为节点的显示文本
+		mermaid += fmt.Sprintf("    %s[%s: %s]\n", node.ID, node.ID, node.Skill)
+	}
+
+	// 渲染依赖关系 (边)
+	mermaid += "\n    %% Dependencies\n"
+	for _, node := range p.Nodes {
+		for _, dep := range node.DependsOn {
+			mermaid += fmt.Sprintf("    %s --> %s\n", dep, node.ID)
+		}
+	}
+
+	return mermaid
+}
+

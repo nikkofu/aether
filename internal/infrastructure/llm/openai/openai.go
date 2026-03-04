@@ -59,7 +59,7 @@ func (a *OpenAIAdapter) Execute(ctx context.Context, prompt string) (string, err
 	return content, err
 }
 
-func (a *OpenAIAdapter) Stream(ctx context.Context, prompt string, onToken cli_adapters.TokenCallback) error {
+func (a *OpenAIAdapter) Stream(ctx context.Context, prompt string, onToken llm.TokenCallback) error {
 	return a.StreamWithUsage(ctx, prompt, onToken, nil)
 }
 
@@ -122,7 +122,7 @@ func (a *OpenAIAdapter) ExecuteWithUsage(ctx context.Context, prompt string) (st
 	}, nil
 }
 
-func (a *OpenAIAdapter) StreamWithUsage(ctx context.Context, prompt string, onToken cli_adapters.TokenCallback, onUsage func(Usage)) error {
+func (a *OpenAIAdapter) StreamWithUsage(ctx context.Context, prompt string, onToken llm.TokenCallback, onUsage func(Usage)) error {
 	if a.tracer != nil {
 		var span observability.Span
 		ctx, span = a.tracer.StartSpan(ctx, "OpenAI.Stream", map[string]any{"model": a.cfg.Model})
@@ -211,4 +211,4 @@ type ChatMessage struct {
 	Content string `json:"content"`
 }
 
-var _ cli_adapters.Adapter = (*OpenAIAdapter)(nil)
+var _ llm.Adapter = (*OpenAIAdapter)(nil)

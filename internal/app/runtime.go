@@ -24,6 +24,7 @@ import (
 	cap_search "github.com/nikkofu/aether/internal/infrastructure/capabilities/search"
 	"github.com/nikkofu/aether/internal/infrastructure/llm"
 	"github.com/nikkofu/aether/internal/infrastructure/llm/gemini"
+	"github.com/nikkofu/aether/internal/infrastructure/llm/ollama"
 	"github.com/nikkofu/aether/internal/infrastructure/llm/openai"
 	"github.com/nikkofu/aether/internal/usecase/cluster"
 	"github.com/nikkofu/aether/pkg/config"
@@ -56,7 +57,7 @@ import (
 type Runtime struct {
 	cfg             *config.Config
 	db              *sql.DB
-	adapterMap      map[string]cli_adapters.Adapter
+	adapterMap      map[string]llm.Adapter
 	registry        *capability.CapabilityRegistry
 	policy          policy.Policy
 	memory          memory.Store
@@ -99,7 +100,7 @@ type Runtime struct {
 	wasmExecutor      *skill_sandbox.WASMExecutor
 }
 
-func (r *Runtime) GetAdapter(name string) (cli_adapters.Adapter, bool) {
+func (r *Runtime) GetAdapter(name string) (llm.Adapter, bool) {
 	a, ok := r.adapterMap[name]
 	return a, ok
 }
@@ -131,7 +132,7 @@ func NewRuntime(cfg *config.Config) *Runtime {
 
 	return &Runtime{
 		cfg:        cfg,
-		adapterMap: make(map[string]cli_adapters.Adapter),
+		adapterMap: make(map[string]llm.Adapter),
 		registry:   capability.NewCapabilityRegistry(),
 		policy:     policy.NewDefaultPolicy(),
 		memory:     memory.NewInMemoryStore(),
@@ -205,6 +206,7 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 	}
 
 	r.RegisterAdapter(gemini.NewAdapterWithBinary(cfg.Runtime.GeminiCommand))
+	
 	if cfg.OpenAI.APIKey != "" {
 		oa := openai.NewOpenAIAdapter(openai.Config{
 			BaseURL: cfg.OpenAI.BaseURL, APIKey: cfg.OpenAI.APIKey, Model: cfg.OpenAI.Model,
@@ -215,7 +217,27 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 		r.RegisterAdapter(oa)
 	}
 
-	llmSkill := skills.NewLLMSkill("llm", r.adapterMap["gemini"], r, r.router, r.tracker, r.tracer, r.strategyStore, nil, "{{.prompt}}")
+	if cfg.Ollama.BaseURL != "" {
+		importOllama := true // 占位符，用来引入 package
+		_ = importOllama
+		ola := ollama.NewOllamaAdapter(ollama.Config{
+			BaseURL: cfg.Ollama.BaseURL, Model: cfg.Ollama.Model,
+			Temperature: cfg.Ollama.Temperature, Timeout: cfg.Ollama.Timeout,
+		})
+		r.RegisterAdapter(ola)
+	}
+
+	// 优先使用 openai, 然后 ollama, 最后 gemini 作为默认
+	var defaultAdapterName string
+	if _, ok := r.adapterMap["openai"]; ok {
+		defaultAdapterName = "openai"
+	} else if _, ok := r.adapterMap["ollama"]; ok {
+		defaultAdapterName = "ollama"
+	} else {
+		defaultAdapterName = "gemini"
+	}
+
+	llmSkill := skills.NewLLMSkill("llm", r.adapterMap[defaultAdapterName], r, r.router, r.tracker, r.tracer, r.strategyStore, nil, "{{.prompt}}")
 	r.registry.Register(llmSkill)
 
 	r.strategyEngine = evolution.NewDefaultStrategyEngine(llmSkill, r.knowledgeGraph, r.logger, r.evolutionGuard)
@@ -309,7 +331,7 @@ func (r *Runtime) InitAgent(role string) error {
 	return nil
 }
 
-func (r *Runtime) RegisterAdapter(a cli_adapters.Adapter) {
+func (r *Runtime) RegisterAdapter(a llm.Adapter) {
 	if a == nil { return }
 	r.adapterMap[a.Name()] = a
 	names := make([]string, 0, len(r.adapterMap))

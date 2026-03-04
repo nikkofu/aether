@@ -14,7 +14,7 @@ import (
 type MockAdapter struct {
 	NameFunc    func() string
 	ExecuteFunc func(ctx context.Context, prompt string) (string, error)
-	StreamFunc  func(ctx context.Context, prompt string, onToken cli_adapters.TokenCallback) error
+	StreamFunc  func(ctx context.Context, prompt string, onToken llm.TokenCallback) error
 }
 
 func (m *MockAdapter) Name() string {
@@ -31,7 +31,7 @@ func (m *MockAdapter) Execute(ctx context.Context, prompt string) (string, error
 	return "mock response", nil
 }
 
-func (m *MockAdapter) Stream(ctx context.Context, prompt string, onToken cli_adapters.TokenCallback) error {
+func (m *MockAdapter) Stream(ctx context.Context, prompt string, onToken llm.TokenCallback) error {
 	if m.StreamFunc != nil {
 		return m.StreamFunc(ctx, prompt, onToken)
 	}
