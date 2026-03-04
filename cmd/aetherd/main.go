@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nikkofu/aether/internal/app"
+	"github.com/nikkofu/aether/internal/delivery/api"
 	"github.com/nikkofu/aether/internal/delivery/webhook"
 	"github.com/nikkofu/aether/pkg/config"
 	"github.com/nikkofu/aether/pkg/logging"
@@ -44,6 +45,10 @@ func main() {
 	// 注册 GitHub Webhook Handler
 	ghHandler := webhook.NewGitHubWebhookHandler(rt.GetBus(), rt.Logger())
 	mux.HandleFunc("/webhooks/github", ghHandler.Handle)
+
+	// 注册实时事件流 Handler
+	streamHandler := api.NewStreamHandler(rt.GetBus(), rt.Logger())
+	mux.HandleFunc("/stream", streamHandler.Handle)
 
 	port := os.Getenv("AETHERD_PORT")
 	if port == "" {
