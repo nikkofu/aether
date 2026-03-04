@@ -38,6 +38,7 @@ import (
 	"github.com/nikkofu/aether/internal/core/memory"
 	"github.com/nikkofu/aether/pkg/metrics"
 	"github.com/nikkofu/aether/pkg/observability"
+	"github.com/nikkofu/aether/pkg/observability/otel"
 	"github.com/nikkofu/aether/pkg/observability/trace"
 	"github.com/nikkofu/aether/internal/domain/org"
 	"github.com/nikkofu/aether/internal/domain/policy"
@@ -150,6 +151,11 @@ func NewRuntime(cfg *config.Config) *Runtime {
 }
 
 func NewDefaultRuntime(cfg *config.Config) *Runtime {
+	// 初始化 OTEL (Jaeger)
+	if _, err := otel.InitTracer("aether-core"); err != nil {
+		fmt.Printf("警告: 无法初始化 OTEL 追踪器: %v\n", err)
+	}
+
 	r := NewRuntime(cfg)
 	if db, err := sql.Open("sqlite", cfg.Runtime.DatabasePath); err == nil {
 		db.SetMaxOpenConns(1)

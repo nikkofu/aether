@@ -88,12 +88,23 @@ func (s *consoleSpan) End() {
 		displayID = displayID[:8]
 	}
 
-	fmt.Fprintf(os.Stderr, "[%s] %s%s%-25s (%s) %v\n",
+	fmt.Fprintf(os.Stderr, "[%s] %s%s%-25s (%s)\n",
 		displayID,
 		indent,
 		treeSymbol,
 		s.name,
 		duration.Round(time.Millisecond),
-		s.meta,
 	)
+
+	// 如果开启了 Debug 级别，打印详细的元数据
+	if os.Getenv("AETHER_LOG_LEVEL") == "debug" && len(s.meta) > 0 {
+		for k, v := range s.meta {
+			// 对大文本进行缩进处理，使其更易读
+			valStr := fmt.Sprintf("%v", v)
+			if strings.Contains(valStr, "\n") {
+				valStr = "\n" + indent + "      " + strings.ReplaceAll(valStr, "\n", "\n"+indent+"      ")
+			}
+			fmt.Fprintf(os.Stderr, "%s    | %s: %s\n", indent, k, valStr)
+		}
+	}
 }
