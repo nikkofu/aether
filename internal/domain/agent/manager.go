@@ -163,7 +163,10 @@ func (m *DefaultAgentManager) Spawn(ctx context.Context, role string, payload ma
 		a, err = factory(ctx, name, payload)
 	} else {
 		switch role {
-		case "planner": a = NewPlannerAgent(name, m.llmSkill, m.tracer)
+		case "planner": 
+			p := NewPlannerAgent(name, m.llmSkill, m.tracer)
+			p.SetGraph(m.graph) // 注入知识库支持 RAG
+			a = p
 		case "coder": a = NewCoderAgent(name, m.llmSkill, m.tracer)
 		case "reviewer": a = NewReviewerAgent(name, m.llmSkill, m.tracer)
 		default: return nil, fmt.Errorf("unsupported role")

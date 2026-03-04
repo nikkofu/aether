@@ -28,4 +28,6 @@ type Graph interface {
 	GetEntity(ctx context.Context, id string) (*Entity, error) // ID 通常全局唯一
 	GetRelations(ctx context.Context, orgID string, id string) ([]Relation, error)
 	QueryByType(ctx context.Context, orgID string, entityType string) ([]Entity, error)
+	// Search 执行基于文本的相似度或关键词搜索（Lite RAG）
+	Search(ctx context.Context, orgID, query string, limit int) ([]Entity, error)
 }

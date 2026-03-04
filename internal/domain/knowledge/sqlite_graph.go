@@ -112,3 +112,28 @@ func (g *SQLiteGraph) GetRelations(ctx context.Context, orgID string, id string)
 	}
 	return results, nil
 }
+
+func (g *SQLiteGraph) Search(ctx context.Context, orgID, queryText string, limit int) ([]Entity, error) {
+	// 使用关键词匹配模拟简单的向量检索
+	sqlQuery := `SELECT id, type, name, metadata, created_at FROM entities 
+	             WHERE org_id = ? AND (name LIKE ? OR metadata LIKE ?) 
+	             ORDER BY created_at DESC LIMIT ?`
+	
+	pattern := "%" + queryText + "%"
+	rows, err := g.db.QueryContext(ctx, sqlQuery, orgID, pattern, pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []Entity
+	for rows.Next() {
+		var e Entity
+		var metaStr string
+		if err := rows.Scan(&e.ID, &e.Type, &e.Name, &metaStr, &e.CreatedAt); err == nil {
+			json.Unmarshal([]byte(metaStr), &e.Metadata)
+			results = append(results, e)
+		}
+	}
+	return results, nil
+}

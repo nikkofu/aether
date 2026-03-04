@@ -280,6 +280,7 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 
 func (r *Runtime) initSystemAgents() {
 	supervisor := agent.NewSupervisorAgent("supervisor", r.tracer, r.logger)
+	supervisor.SetGraph(r.knowledgeGraph)
 	r.agentManager.Register(supervisor)
 	r.bus.Subscribe(supervisor)
 

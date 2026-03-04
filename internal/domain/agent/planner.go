@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nikkofu/aether/internal/domain/capability"
+	"github.com/nikkofu/aether/internal/domain/knowledge"
 	"github.com/nikkofu/aether/pkg/observability"
 )
 
@@ -15,6 +17,7 @@ type PlannerAgent struct {
 	llm     capability.Capability
 	tracer  observability.Tracer
 	manager AgentManager
+	graph   knowledge.Graph
 }
 
 func NewPlannerAgent(name string, llm capability.Capability, tracer observability.Tracer) *PlannerAgent {
@@ -26,6 +29,7 @@ func NewPlannerAgent(name string, llm capability.Capability, tracer observabilit
 }
 
 func (a *PlannerAgent) SetManager(m AgentManager) { a.manager = m }
+func (a *PlannerAgent) SetGraph(g knowledge.Graph) { a.graph = g }
 
 func (a *PlannerAgent) Handle(ctx context.Context, msg Message) ([]Message, error) {
 	return a.ProtectedHandle(ctx, msg, func() ([]Message, error) {
@@ -38,10 +42,36 @@ func (a *PlannerAgent) Handle(ctx context.Context, msg Message) ([]Message, erro
 		if msg.Type != "task_plan_request" { return nil, nil }
 
 		description, _ := msg.Payload["description"].(string)
+		orgID, _ := msg.Payload["org_id"].(string)
+		if orgID == "" { orgID = "default" }
+
+		// --- Lite RAG: 检索长程记忆 ---
+		var memoryHints []string
+		if a.graph != nil {
+			// 基于描述中的前 20 个字符进行简单的相似度检索
+			searchKey := description
+			if len(searchKey) > 20 { searchKey = searchKey[:20] }
+			
+			entities, _ := a.graph.Search(ctx, orgID, searchKey, 3)
+			for _, e := range entities {
+				if e.Type == "reflection" {
+					analysis, _ := e.Metadata["analysis"].(string)
+					if analysis != "" {
+						memoryHints = append(memoryHints, fmt.Sprintf("- 历史经验(%s): %s", e.Name, analysis))
+					}
+				}
+			}
+		}
+
+		prompt := fmt.Sprintf("拆解任务：'%s'。按模块分工。", description)
+		if len(memoryHints) > 0 {
+			prompt = fmt.Sprintf("参考以下历史工程经验：\n%s\n\n基于以上经验，拆解当前任务：'%s'。请确保避免过去犯过的错误。", 
+				strings.Join(memoryHints, "\n"), description)
+		}
 
 		// 注入 agent_name 以便 Skill 获取策略
 		input := map[string]any{
-			"prompt":     fmt.Sprintf("拆解任务：'%s'。按模块分工。", description),
+			"prompt":     prompt,
 			"agent_name": a.name,
 		}
 		

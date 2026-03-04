@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0-alpha] - 2026-03-02
+
+### Added
+- **Long-term Engineering Memory (Lite RAG)**:
+  - Implemented `Search` interface in `KnowledgeGraph` for semantic-ish experience retrieval.
+  - `PlannerAgent` now automatically queries past task `Reflections` to avoid repeating historical mistakes.
+  - `SupervisorAgent` automatically persists "Lessons Learned" into the graph after every task completion.
+  - Closed the "Execution -> Reflection -> Learning -> Guidance" autonomous loop.
+
 ## [1.2.0-alpha] - 2026-03-02
 
 ### Added
