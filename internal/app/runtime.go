@@ -46,6 +46,8 @@ import (
 	"github.com/nikkofu/aether/internal/domain/risk"
 	"github.com/nikkofu/aether/pkg/routing"
 	"github.com/nikkofu/aether/pkg/security/rbac"
+	"github.com/nikkofu/aether/internal/usecase/skills/engine"
+	skill_registry "github.com/nikkofu/aether/internal/usecase/skills/registry"
 	skill_sandbox "github.com/nikkofu/aether/internal/usecase/skills/sandbox"
 	"github.com/nikkofu/aether/internal/domain/strategy"
 	"github.com/nikkofu/aether/internal/domain/strategy/evolution"
@@ -98,6 +100,7 @@ type Runtime struct {
 	// 能力网关
 	capabilityGateway capabilities.Gateway
 	wasmExecutor      *skill_sandbox.WASMExecutor
+	compiler          *engine.PolyglotCompiler
 }
 
 func (r *Runtime) GetAdapter(name string) (llm.Adapter, bool) {
@@ -115,6 +118,7 @@ func (r *Runtime) StrategicStore() strategic.Store { return r.strategicStore }
 func (r *Runtime) StrategicEngine() *strategic.Engine { return r.strategicEngine }
 func (r *Runtime) CapabilityGateway() capabilities.Gateway { return r.capabilityGateway }
 func (r *Runtime) WASMExecutor() *skill_sandbox.WASMExecutor { return r.wasmExecutor }
+func (r *Runtime) Compiler() *engine.PolyglotCompiler { return r.compiler }
 func (r *Runtime) Scheduler() *cluster.Scheduler { return r.scheduler }
 
 func NewRuntime(cfg *config.Config) *Runtime {
@@ -243,6 +247,9 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 	r.strategyEngine = evolution.NewDefaultStrategyEngine(llmSkill, r.knowledgeGraph, r.logger, r.evolutionGuard)
 	r.reflector = reflection.NewLLMReflector(llmSkill)
 	r.strategicPlanner = strategic.NewLLMStrategicPlanner(llmSkill, r.knowledgeGraph, r.strategyEngine)
+
+	skillEngine, _ := skill_registry.NewSQLiteSkillEngine(r.db, r.wasmExecutor, "./data/wasm_cache")
+	r.compiler = engine.NewPolyglotCompiler(skillEngine, "llm", r.logger, "./data/wasm_cache")
 
 	dm := agent.NewDefaultAgentManager(llmSkill, r.tracer, r.logger, r.bus, r.knowledgeGraph, cfg.Agent.MaxSpawnPerTask, cfg.Agent.MaxConcurrency, r.traceEngine)
 	dm.SetLearning(r.reflector, r.reflectionStore, r.learningEngine)

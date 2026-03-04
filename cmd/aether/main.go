@@ -68,7 +68,7 @@ func handleSingle(ctx context.Context, rt *app.Runtime, args []string) {
 	case "run":
 		handleRun(rt, args[1:])
 	case "skill":
-		cli.NewSkillHandler(rt.GetRegistry()).Handle(ctx, args[1:])
+		cli.NewSkillHandler(rt).Handle(ctx, args[1:])
 	case "pipeline":
 		cli.NewPipelineHandler(rt).Handle(ctx, args[1:])
 	default:

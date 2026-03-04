@@ -8,18 +8,21 @@ import (
 	"os"
 	"time"
 
+	"github.com/nikkofu/aether/internal/app"
 	"github.com/nikkofu/aether/internal/domain/capability"
 )
 
 // SkillHandler 处理所有与技能相关的命令行指令。
 type SkillHandler struct {
+	runtime  *app.Runtime
 	registry *capability.CapabilityRegistry
 }
 
 // NewSkillHandler 创建一个新的 SkillHandler。
-func NewSkillHandler(reg *capability.CapabilityRegistry) *SkillHandler {
+func NewSkillHandler(rt *app.Runtime) *SkillHandler {
 	return &SkillHandler{
-		registry: reg,
+		runtime:  rt,
+		registry: rt.GetRegistry(),
 	}
 }
 
@@ -38,6 +41,8 @@ func (h *SkillHandler) Handle(ctx context.Context, args []string) {
 		h.listSkills()
 	case "run":
 		h.runSkill(ctx, subArgs)
+	case "compile":
+		h.compileSkill(ctx, subArgs)
 	default:
 		fmt.Fprintf(os.Stderr, "错误: 未知 skill 子命令 '%s'\n", subCommand)
 		h.printUsage()
@@ -110,6 +115,52 @@ func (h *SkillHandler) runSkill(ctx context.Context, args []string) {
 	}
 }
 
+func (h *SkillHandler) compileSkill(ctx context.Context, args []string) {
+	compileCmd := flag.NewFlagSet("skill compile", flag.ExitOnError)
+	lang := compileCmd.String("lang", "python", "源代码的编程语言 (例如: python, js)")
+	name := compileCmd.String("name", "custom_skill", "生成的技能名称")
+	
+	compileCmd.Parse(args)
+	remaining := compileCmd.Args()
+
+	if len(remaining) < 1 {
+		fmt.Fprintln(os.Stderr, "错误: 必须指定源代码文件路径")
+		compileCmd.Usage()
+		os.Exit(1)
+	}
+	
+	sourceFile := remaining[0]
+	codeBytes, err := os.ReadFile(sourceFile)
+	if err != nil {
+		h.printErrorJSON(fmt.Errorf("无法读取源文件 %s: %w", sourceFile, err))
+		os.Exit(1)
+	}
+
+	compiler := h.runtime.Compiler()
+	if compiler == nil {
+		h.printErrorJSON(fmt.Errorf("当前运行环境未初始化编译器"))
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "🚀 正在通过 LLM 将 %s 代码编译为 WASM...\n", *lang)
+	start := time.Now()
+	
+	wasmPath, err := compiler.Compile(ctx, string(codeBytes), *lang, *name)
+	if err != nil {
+		h.printErrorJSON(err)
+		os.Exit(1)
+	}
+
+	duration := time.Since(start)
+	h.printJSON(map[string]any{
+		"status":    "success",
+		"skill":     *name,
+		"wasm_file": wasmPath,
+		"duration":  duration.String(),
+		"message":   "可以使用 'aether skill run' 或将其注册到数据库中运行",
+	})
+}
+
 func (h *SkillHandler) printJSON(data any) {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
@@ -130,7 +181,11 @@ func (h *SkillHandler) printUsage() {
 	fmt.Println("\n可用命令:")
 	fmt.Println("  list            列出所有可用技能")
 	fmt.Println("  run [flags] <name> 执行指定技能")
+	fmt.Println("  compile [flags] <file> 自动将源码(如Python)编译为WASM技能")
 	fmt.Println("\n'run' 命令参数:")
 	fmt.Println("  --input string  传递给技能的 JSON 输入 (默认 \"{}\")")
 	fmt.Println("  --stream        启用流式输出实时打印内容")
+	fmt.Println("\n'compile' 命令参数:")
+	fmt.Println("  --lang string   源码语言 (默认 \"python\")")
+	fmt.Println("  --name string   目标技能名称 (默认 \"custom_skill\")")
 }
