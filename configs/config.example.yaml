@@ -1,27 +1,30 @@
+# Aether 示例配置文件
+
 app:
-  name: aether
-  environment: development
+  mode: "single" # single, cluster-leader, cluster-worker
+  node_id: "node-1"
+  role: "general"
 
-scheduler:
-  workers: 4
-  retry_limit: 3
+agent:
+  max_spawn_per_task: 5
+  max_concurrency: 20
 
-adapters:
-  gemini:
-    command: "gemini"
-    timeout_seconds: 120
-  claude:
-    command: "claude-code"
-    timeout_seconds: 120
+runtime:
+  database_path: "./aether.db"
+  # nats_url: "nats://localhost:4222" # 分布式模式需要
 
-policy:
-  allow_file_write: true
-  allow_git_push: false
-  allow_shell_exec: false
+# 本地 LLM (默认优先)
+ollama:
+  base_url: "http://localhost:11434"
+  model: "qwen3.5:0.8b"
+  temperature: 0.7
+  timeout: 300s
 
-memory:
-  backend: sqlite
-  path: "./aether.db"
+# 可选：OpenAI
+# openai:
+#   api_key: "sk-..."
+#   model: "gpt-4o"
+#   temperature: 0.7
 
-observability:
-  log_level: "info"
+log:
+  level: "info"

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0-alpha] - 2026-03-02
+
+### Added
+- **Ollama as Default Provider**:
+  - Set Ollama as the primary LLM provider for all core tasks.
+  - Default model updated to `qwen3.5:0.8b` for improved performance in low-resource environments.
+- **Refactored LLM Bootstrapping**:
+  - Modularized `initLLM` in `Runtime` to allow cleaner prioritization of local over cloud models.
+
+### Removed
+- **Gemini CLI Adapter**:
+  - Removed direct `gemini-cli` binary calls to focus on stable API-based/Local integrations.
+
+### Changed
+- **Config Defaults**: Updated `config.example.yaml` to showcase Ollama-first setup.
+
 ## [1.6.0-alpha] - 2026-03-02
 
 ### Added

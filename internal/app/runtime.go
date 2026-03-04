@@ -23,7 +23,6 @@ import (
 	cap_reg "github.com/nikkofu/aether/internal/infrastructure/capabilities/registry"
 	cap_search "github.com/nikkofu/aether/internal/infrastructure/capabilities/search"
 	"github.com/nikkofu/aether/internal/infrastructure/llm"
-	"github.com/nikkofu/aether/internal/infrastructure/llm/gemini"
 	"github.com/nikkofu/aether/internal/infrastructure/llm/ollama"
 	"github.com/nikkofu/aether/internal/infrastructure/llm/openai"
 	"github.com/nikkofu/aether/internal/usecase/cluster"
@@ -209,40 +208,8 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 		}
 	}
 
-	r.RegisterAdapter(gemini.NewAdapterWithBinary(cfg.Runtime.GeminiCommand))
-	
-	if cfg.OpenAI.APIKey != "" {
-		oa := openai.NewOpenAIAdapter(openai.Config{
-			BaseURL: cfg.OpenAI.BaseURL, APIKey: cfg.OpenAI.APIKey, Model: cfg.OpenAI.Model,
-			Temperature: cfg.OpenAI.Temperature, Timeout: cfg.OpenAI.Timeout,
-		})
-		oa.SetTracer(r.tracer)
-		oa.SetTraceEngine(r.traceEngine)
-		r.RegisterAdapter(oa)
-	}
-
-	if cfg.Ollama.BaseURL != "" {
-		importOllama := true // 占位符，用来引入 package
-		_ = importOllama
-		ola := ollama.NewOllamaAdapter(ollama.Config{
-			BaseURL: cfg.Ollama.BaseURL, Model: cfg.Ollama.Model,
-			Temperature: cfg.Ollama.Temperature, Timeout: cfg.Ollama.Timeout,
-		})
-		r.RegisterAdapter(ola)
-	}
-
-	// 优先使用 openai, 然后 ollama, 最后 gemini 作为默认
-	var defaultAdapterName string
-	if _, ok := r.adapterMap["openai"]; ok {
-		defaultAdapterName = "openai"
-	} else if _, ok := r.adapterMap["ollama"]; ok {
-		defaultAdapterName = "ollama"
-	} else {
-		defaultAdapterName = "gemini"
-	}
-
-	llmSkill := skills.NewLLMSkill("llm", r.adapterMap[defaultAdapterName], r, r.router, r.tracker, r.tracer, r.strategyStore, nil, "{{.prompt}}")
-	r.registry.Register(llmSkill)
+	// 初始化 LLM (默认优先使用 Ollama)
+	llmSkill := r.initLLM(cfg)
 
 	r.strategyEngine = evolution.NewDefaultStrategyEngine(llmSkill, r.knowledgeGraph, r.logger, r.evolutionGuard)
 	r.reflector = reflection.NewLLMReflector(llmSkill)
@@ -389,4 +356,49 @@ func (r *Runtime) injectAndRegisterOrg(a org.OrgAgent) {
 	r.orgRegistry.Register(a)
 	r.agentManager.Register(a)
 	r.bus.Subscribe(a)
+}
+
+func (r *Runtime) initLLM(cfg *config.Config) capability.Capability {
+	// 1. 注册 Ollama (优先，作为本地默认)
+	if cfg.Ollama.BaseURL != "" {
+		ola := ollama.NewOllamaAdapter(ollama.Config{
+			BaseURL: cfg.Ollama.BaseURL, Model: cfg.Ollama.Model,
+			Temperature: cfg.Ollama.Temperature, Timeout: cfg.Ollama.Timeout,
+		})
+		r.RegisterAdapter(ola)
+	}
+
+	// 2. 注册 OpenAI (可选)
+	if cfg.OpenAI.APIKey != "" {
+		oa := openai.NewOpenAIAdapter(openai.Config{
+			BaseURL: cfg.OpenAI.BaseURL, APIKey: cfg.OpenAI.APIKey, Model: cfg.OpenAI.Model,
+			Temperature: cfg.OpenAI.Temperature, Timeout: cfg.OpenAI.Timeout,
+		})
+		if r.traceEngine != nil {
+			oa.SetTracer(r.tracer)
+			oa.SetTraceEngine(r.traceEngine)
+		}
+		r.RegisterAdapter(oa)
+	}
+
+	// 3. 选择默认适配器: Ollama > OpenAI
+	var defaultAdapter llm.Adapter
+	if a, ok := r.adapterMap["ollama"]; ok {
+		defaultAdapter = a
+	} else if a, ok := r.adapterMap["openai"]; ok {
+		defaultAdapter = a
+	}
+
+	if defaultAdapter == nil {
+		// 如果没有任何配置，尝试使用默认本地 ollama
+		defaultAdapter = ollama.NewOllamaAdapter(ollama.Config{
+			BaseURL: "http://localhost:11434", Model: "qwen2.5:0.5b",
+			Temperature: 0.7, Timeout: 300 * time.Second,
+		})
+		r.RegisterAdapter(defaultAdapter)
+	}
+
+	llmSkill := skills.NewLLMSkill("llm", defaultAdapter, r, r.router, r.tracker, r.tracer, r.strategyStore, nil, "{{.prompt}}")
+	r.registry.Register(llmSkill)
+	return llmSkill
 }
