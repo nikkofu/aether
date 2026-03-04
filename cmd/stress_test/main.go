@@ -7,7 +7,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/nikkofu/aether/internal/economy"
+	"github.com/nikkofu/aether/internal/core/economy"
 )
 
 func main() {

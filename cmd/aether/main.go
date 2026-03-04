@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nikkofu/aether/internal/agent"
-	"github.com/nikkofu/aether/internal/cli"
-	"github.com/nikkofu/aether/internal/cluster"
-	"github.com/nikkofu/aether/internal/config"
-	"github.com/nikkofu/aether/internal/observability/otel"
+	"github.com/nikkofu/aether/internal/core/agent"
+	"github.com/nikkofu/aether/internal/ports/cli"
+	"github.com/nikkofu/aether/internal/core/cluster"
+	"github.com/nikkofu/aether/internal/pkg/config"
+	"github.com/nikkofu/aether/internal/pkg/observability/otel"
 	"github.com/nikkofu/aether/internal/runtime"
 )
 

@@ -6,9 +6,9 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/nikkofu/aether/internal/config"
-	"github.com/nikkofu/aether/internal/logging"
-	"github.com/nikkofu/aether/internal/todo"
+	"github.com/nikkofu/aether/internal/pkg/config"
+	"github.com/nikkofu/aether/internal/pkg/logging"
+	"github.com/nikkofu/aether/internal/ports/todo"
 	_ "modernc.org/sqlite"
 )
 

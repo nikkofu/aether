@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/nikkofu/aether/internal/observability/metrics"
-	"github.com/nikkofu/aether/internal/observability/trace"
+	"github.com/nikkofu/aether/internal/pkg/observability/metrics"
+	"github.com/nikkofu/aether/internal/pkg/observability/trace"
 )
 
 func main() {
