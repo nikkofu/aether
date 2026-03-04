@@ -34,6 +34,11 @@ func NewSupervisorAgent(name string, t observability.Tracer, l logging.Logger) *
 func (a *SupervisorAgent) SetGraph(g knowledge.Graph) { a.graph = g }
 
 func (a *SupervisorAgent) Handle(ctx context.Context, msg Message) ([]Message, error) {
+	// 优先处理系统级消息
+	if sysMsgs := a.HandleSystemMessage(ctx, msg); sysMsgs != nil {
+		return sysMsgs, nil
+	}
+
 	return a.ProtectedHandle(ctx, msg, func() ([]Message, error) {
 		if a.tracer != nil {
 			var span observability.Span

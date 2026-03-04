@@ -5,6 +5,15 @@ import (
 	"time"
 )
 
+// 核心系统消息类型
+const (
+	TypeSystemAlert   = "system.alert"
+	TypeSystemSpawn   = "system.spawn"
+	TypeTaskTender    = "system.task_tender"    // 任务招标
+	TypeBidSubmission = "system.bid_submission" // 提交竞标
+	TypeTaskAward     = "system.task_award"     // 授予任务
+)
+
 // AgentRoleFactory 定义了如何动态创建一个特定角色的代理。
 type AgentRoleFactory func(ctx context.Context, name string, payload map[string]any) (Agent, error)
 

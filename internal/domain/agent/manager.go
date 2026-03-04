@@ -45,6 +45,7 @@ type DefaultAgentManager struct {
 
 type Scheduler interface {
 	SelectWorker(ctx context.Context, role string) string
+	SelectByBidding(ctx context.Context, b Bus, role, taskID string, basePrice float64) string
 }
 
 func (m *DefaultAgentManager) SetScheduler(s Scheduler) {
@@ -133,7 +134,14 @@ func (m *DefaultAgentManager) Spawn(ctx context.Context, role string, payload ma
 	m.mu.RUnlock()
 
 	if scheduler != nil {
-		workerID := scheduler.SelectWorker(ctx, role)
+		var workerID string
+		// 如果是重要任务或明确要求竞标（此处逻辑：对于 planner 角色开启竞标）
+		if role == "planner" && taskID != "" {
+			workerID = scheduler.SelectByBidding(ctx, m.bus, role, taskID, 1.0)
+		} else {
+			workerID = scheduler.SelectWorker(ctx, role)
+		}
+
 		if workerID != "" && workerID != "local" {
 			// 发布远程创建消息
 			m.bus.Publish(ctx, Message{

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0-alpha] - 2026-03-02
+
+### Added
+- **Competitive Bidding Economy (Task Auction)**:
+  - Implemented a decentralized task allocation protocol (`task_tender`, `bid_submission`).
+  - `Scheduler` now supports Auction-based selection, evaluating agents based on a weighted score of bid price (40%) and reputation (60%).
+  - `BaseAgent` automatically participates in relevant tenders when idle, using a simple game-theory pricing strategy.
+  - Significantly improves load balancing and cost-efficiency in large-scale multi-agent deployments.
+
 ## [1.3.0-alpha] - 2026-03-02
 
 ### Added

@@ -32,6 +32,11 @@ func (a *PlannerAgent) SetManager(m AgentManager) { a.manager = m }
 func (a *PlannerAgent) SetGraph(g knowledge.Graph) { a.graph = g }
 
 func (a *PlannerAgent) Handle(ctx context.Context, msg Message) ([]Message, error) {
+	// 优先处理系统级消息（如竞标招标）
+	if sysMsgs := a.HandleSystemMessage(ctx, msg); sysMsgs != nil {
+		return sysMsgs, nil
+	}
+
 	return a.ProtectedHandle(ctx, msg, func() ([]Message, error) {
 		if a.tracer != nil {
 			var span observability.Span

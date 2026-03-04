@@ -143,5 +143,34 @@ func (b *BaseAgent) reflectAndLearn(ctx context.Context, taskID string, start ti
 	_ = b.learningEngine.UpdateStrategy(reflectResult)
 }
 
+func (b *BaseAgent) HandleSystemMessage(ctx context.Context, msg Message) []Message {
+	if msg.Type == TypeTaskTender {
+		targetRole, _ := msg.Payload["role"].(string)
+		if targetRole != b.role { return nil }
+
+		// 如果当前代理正忙，不竞标
+		if b.Status() != StatusIdle { return nil }
+
+		taskID, _ := msg.Payload["task_id"].(string)
+		basePrice, _ := msg.Payload["base_price"].(float64)
+
+		// 竞标算法：基于基础价格随机浮动，模拟节点差异
+		// 实际上这里可以集成更复杂的逻辑，比如基于过去 10 次成功的平均耗时来报价
+		myPrice := basePrice * 0.9 // 默认打 9 折以增加竞争力
+
+		return []Message{{
+			From:      b.name,
+			To:        msg.From, // 发回给招标方 (Scheduler)
+			Type:      TypeBidSubmission,
+			Timestamp: time.Now(),
+			Payload: map[string]any{
+				"task_id": taskID,
+				"price":   myPrice,
+			},
+		}}
+	}
+	return nil
+}
+
 func (b *BaseAgent) Spawn(ctx context.Context, role string, payload map[string]any) (string, error) { return "", nil }
 func (b *BaseAgent) Shutdown(ctx context.Context) error { return nil }
