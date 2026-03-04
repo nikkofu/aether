@@ -38,67 +38,83 @@ func (a *PlannerAgent) Handle(ctx context.Context, msg Message) ([]Message, erro
 	}
 
 	return a.ProtectedHandle(ctx, msg, func() ([]Message, error) {
-		if a.tracer != nil {
-			var span observability.Span
-			ctx, span = a.tracer.StartSpan(ctx, "Planner.Handle", map[string]any{"type": msg.Type})
-			defer span.End()
-		}
-
 		if msg.Type != "task_plan_request" { return nil, nil }
 
 		description, _ := msg.Payload["description"].(string)
 		orgID, _ := msg.Payload["org_id"].(string)
 		if orgID == "" { orgID = "default" }
 
-		// --- Lite RAG: 检索长程记忆 ---
-		var memoryHints []string
-		if a.graph != nil {
-			// 基于描述中的前 20 个字符进行简单的相似度检索
-			searchKey := description
-			if len(searchKey) > 20 { searchKey = searchKey[:20] }
-			
-			entities, _ := a.graph.Search(ctx, orgID, searchKey, 3)
-			for _, e := range entities {
-				if e.Type == "reflection" {
-					analysis, _ := e.Metadata["analysis"].(string)
-					if analysis != "" {
-						memoryHints = append(memoryHints, fmt.Sprintf("- 历史经验(%s): %s", e.Name, analysis))
+		if a.tracer != nil {
+			var span observability.Span
+			ctx, span = a.tracer.StartSpan(ctx, "Planner.Handle", map[string]any{
+				"msg_id":      msg.ID,
+				"description": description,
+			})
+			defer span.End()
+
+			// --- Lite RAG: 检索长程记忆 ---
+			var memoryHints []string
+			if a.graph != nil {
+				searchKey := description
+				if len(searchKey) > 20 { searchKey = searchKey[:20] }
+				
+				entities, _ := a.graph.Search(ctx, orgID, searchKey, 3)
+				for _, e := range entities {
+					if e.Type == "reflection" {
+						analysis, _ := e.Metadata["analysis"].(string)
+						if analysis != "" {
+							memoryHints = append(memoryHints, analysis)
+						}
 					}
 				}
+				if len(memoryHints) > 0 {
+					span.End() // 先结束之前的
+					ctx, span = a.tracer.StartSpan(ctx, "Planner.MemoryRecall", map[string]any{
+						"recalled_memories": memoryHints,
+					})
+				}
 			}
-		}
 
-		prompt := fmt.Sprintf("拆解任务：'%s'。按模块分工。", description)
-		if len(memoryHints) > 0 {
-			prompt = fmt.Sprintf("参考以下历史工程经验：\n%s\n\n基于以上经验，拆解当前任务：'%s'。请确保避免过去犯过的错误。", 
-				strings.Join(memoryHints, "\n"), description)
-		}
+			prompt := fmt.Sprintf("拆解任务：'%s'。按模块分工。", description)
+			if len(memoryHints) > 0 {
+				prompt = fmt.Sprintf("参考以下历史工程经验：\n%s\n\n基于以上经验，拆解当前任务：'%s'。请确保避免过去犯过的错误。", 
+					strings.Join(memoryHints, "\n"), description)
+			}
 
-		// 注入 agent_name 以便 Skill 获取策略
-		input := map[string]any{
-			"prompt":     prompt,
-			"agent_name": a.name,
-		}
-		
-		output, err := a.llm.Execute(ctx, input)
-		if err != nil { return nil, err }
-		
-		plan, _ := output["output"].(string)
+			// 记录 LLM 调用 Span
+			llmCtx, llmSpan := a.tracer.StartSpan(ctx, "Planner.LLM_Inference", map[string]any{
+				"final_prompt": prompt,
+			})
+			output, err := a.llm.Execute(llmCtx, map[string]any{"prompt": prompt, "agent_name": a.name})
+			if err != nil {
+				llmSpan.End()
+				return nil, err
+			}
+			plan, _ := output["output"].(string)
+			llmSpan.End()
 
-		if a.manager != nil {
-			_, _ = a.manager.Spawn(ctx, "coder", map[string]any{"task_id": msg.ID})
-		}
+			// 记录最终计划
+			_, finalSpan := a.tracer.StartSpan(ctx, "Planner.Result", map[string]any{
+				"generated_plan": plan,
+			})
+			finalSpan.End()
 
-		return []Message{{
-			From:      a.name,
-			To:        "coder",
-			Type:      "instruction",
-			Timestamp: time.Now(),
-			Payload: map[string]any{
-				"plan": plan,
-				"task": description,
-			},
-		}}, nil
+			if a.manager != nil {
+				a.manager.Spawn(ctx, "coder", map[string]any{"task_id": msg.ID, "plan": plan})
+			}
+
+			return []Message{{
+				From:      a.name,
+				To:        "coder",
+				Type:      "instruction",
+				Timestamp: time.Now(),
+				Payload: map[string]any{
+					"plan": plan,
+					"task": description,
+				},
+			}}, nil
+		}
+		return nil, nil // 兜底
 	})
 }
 

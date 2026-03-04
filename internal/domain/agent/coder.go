@@ -33,32 +33,46 @@ func (a *CoderAgent) Handle(ctx context.Context, msg Message) ([]Message, error)
 	return a.ProtectedHandle(ctx, msg, func() ([]Message, error) {
 		if a.tracer != nil {
 			var span observability.Span
-			ctx, span = a.tracer.StartSpan(ctx, "Coder.Handle", map[string]any{"type": msg.Type})
+			ctx, span = a.tracer.StartSpan(ctx, "Coder.Handle", map[string]any{
+				"task_desc": msg.Payload["task"],
+				"plan":      msg.Payload["plan"],
+			})
 			defer span.End()
+
+			if msg.Type != "instruction" { return nil, nil }
+
+			plan := msg.Payload["plan"].(string)
+			task := msg.Payload["task"].(string)
+
+			prompt := fmt.Sprintf("基于规划实现代码：\n任务：%s\n规划：%s", task, plan)
+			
+			// 记录 LLM 动作
+			llmCtx, llmSpan := a.tracer.StartSpan(ctx, "Coder.LLM_Inference", map[string]any{
+				"prompt": prompt,
+			})
+			output, err := a.llmSkill.Execute(llmCtx, map[string]any{"prompt": prompt, "agent_name": a.name})
+			if err != nil {
+				llmSpan.End()
+				return nil, err
+			}
+			code, _ := output["output"].(string)
+			llmSpan.End()
+
+			// 记录生成结果
+			_, resSpan := a.tracer.StartSpan(ctx, "Coder.Output", map[string]any{
+				"generated_content": code,
+			})
+			resSpan.End()
+
+			return []Message{{
+				From:      a.name,
+				To:        "reviewer",
+				Type:      "review_request",
+				Timestamp: time.Now(),
+				Payload:   map[string]any{"code": code, "task": task},
+			}}, nil
 		}
-
-		if msg.Type != "instruction" { return nil, nil }
-
-		plan := msg.Payload["plan"].(string)
-		task := msg.Payload["task"].(string)
-
-		input := map[string]any{
-			"prompt":     fmt.Sprintf("基于规划实现代码：\n任务：%s\n规划：%s", task, plan),
-			"agent_name": a.name,
-		}
-
-		output, err := a.llmSkill.Execute(ctx, input)
-		if err != nil { return nil, err }
-
-		code, _ := output["output"].(string)
-
-		return []Message{{
-			From:      a.name,
-			To:        "reviewer",
-			Type:      "review_request",
-			Timestamp: time.Now(),
-			Payload:   map[string]any{"code": code, "task": task},
-		}}, nil
+		return nil, nil
 	})
 }
 

@@ -1,0 +1,20 @@
+app:
+  mode: "single"
+  node_id: "local-debug-node"
+
+agent:
+  max_spawn_per_task: 10
+  max_concurrency: 50
+
+runtime:
+  database_path: "./aether.db"
+  # nats_url: "" # 彻底禁用 NATS 以确保本地极速响应
+
+ollama:
+  base_url: "http://localhost:11434"
+  model: "qwen3.5:0.8b"
+  temperature: 0.7
+  timeout: 300s
+
+log:
+  level: "debug"

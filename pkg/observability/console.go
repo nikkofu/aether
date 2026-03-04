@@ -1,7 +1,9 @@
 package observability
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -82,29 +84,39 @@ func (s *consoleSpan) End() {
 		treeSymbol = "● "
 	}
 
-	// 格式化输出
+	// 格式化输出标题
 	displayID := s.traceID
 	if len(displayID) > 8 {
 		displayID = displayID[:8]
 	}
 
-	fmt.Fprintf(os.Stderr, "[%s] %s%s%-25s (%s)\n",
+	fmt.Fprintf(os.Stderr, "\n[%s] %s%s %s (%s)\n",
 		displayID,
 		indent,
 		treeSymbol,
-		s.name,
+		strings.ToUpper(s.name),
 		duration.Round(time.Millisecond),
 	)
 
 	// 如果开启了 Debug 级别，打印详细的元数据
 	if os.Getenv("AETHER_LOG_LEVEL") == "debug" && len(s.meta) > 0 {
 		for k, v := range s.meta {
-			// 对大文本进行缩进处理，使其更易读
 			valStr := fmt.Sprintf("%v", v)
+			// 如果是 JSON 字符串，尝试美化
+			if strings.HasPrefix(valStr, "{") || strings.HasPrefix(valStr, "[") {
+				var prettyJSON bytes.Buffer
+				if err := json.Indent(&prettyJSON, []byte(valStr), indent+"      ", "  "); err == nil {
+					valStr = prettyJSON.String()
+				}
+			}
+
+			// 处理多行缩进
 			if strings.Contains(valStr, "\n") {
 				valStr = "\n" + indent + "      " + strings.ReplaceAll(valStr, "\n", "\n"+indent+"      ")
 			}
-			fmt.Fprintf(os.Stderr, "%s    | %s: %s\n", indent, k, valStr)
+			
+			fmt.Fprintf(os.Stderr, "%s    ├── %s: %s\n", indent, strings.ToUpper(k), valStr)
 		}
+		fmt.Fprintf(os.Stderr, "%s    └── [END META]\n", indent)
 	}
 }

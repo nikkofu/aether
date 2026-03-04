@@ -119,6 +119,9 @@ func (s *Scheduler) SelectByBidding(ctx context.Context, b agent.Bus, role, task
 	orgID := "default"
 	
 	// 1. 发布招标公告
+	if s.logger != nil {
+		s.logger.Info(ctx, "发布任务招标公告", logging.String("task_id", taskID), logging.String("role", role))
+	}
 	b.Publish(ctx, agent.Message{
 		From:      "scheduler",
 		To:        "broadcast",
@@ -140,6 +143,9 @@ func (s *Scheduler) SelectByBidding(ctx context.Context, b agent.Bus, role, task
 	s.mu.Unlock()
 
 	if len(records) == 0 {
+		if s.logger != nil {
+			s.logger.Debug(ctx, "未收到外部竞标，尝试普通节点调度", logging.String("task_id", taskID))
+		}
 		return s.SelectWorker(ctx, role) // 回退到普通调度
 	}
 

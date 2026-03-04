@@ -33,7 +33,17 @@ func main() {
 	}
 
 	modeFlag := flag.String("mode", "", "运行模式")
+	configPath := flag.String("config", "", "配置文件路径")
 	flag.Parse()
+
+	// 如果指定了配置文件，重新加载
+	if *configPath != "" {
+		newCfg, err := config.Load(*configPath)
+		if err == nil {
+			cfg = newCfg
+		}
+	}
+
 	if *modeFlag != "" { cfg.App.Mode = *modeFlag }
 
 	rt := app.NewDefaultRuntime(cfg)
@@ -163,12 +173,41 @@ func printJSON(data any) {
 }
 
 func handleRun(rt *app.Runtime, args []string) {
-	runCmd := flag.NewFlagSet("run", flag.ExitOnError)
-	adapter := runCmd.String("adapter", "gemini", "适配器")
-	runCmd.Parse(args)
-	if runCmd.NArg() < 1 { return }
-	res, _ := rt.Execute(context.Background(), *adapter, runCmd.Arg(0))
-	fmt.Println(res)
+	if len(args) < 1 {
+		fmt.Println("用法: aether run <task_description>")
+		return
+	}
+	taskDesc := args[0]
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	fmt.Printf("🚀 启动 Agentic 协作任务: %s\n", taskDesc)
+	fmt.Println("--------------------------------------------------------------------------------")
+
+	// 1. 初始化并启动系统级代理
+	rt.StartAgents(ctx)
+	
+	// 给异步订阅一点启动时间
+	time.Sleep(200 * time.Millisecond)
+
+	// 2. 向总线发布任务指令
+	rt.GetBus().Publish(ctx, agent.Message{
+		ID:        "task-" + time.Now().Format("150405"),
+		From:      "cli",
+		To:        "supervisor",
+		Type:      "task",
+		Timestamp: time.Now(),
+		Payload: map[string]any{
+			"description": taskDesc,
+		},
+	})
+
+	// 3. 阻塞直到任务完成或手动退出
+	// 这里的简化逻辑是等待上下文结束，实际场景中可以通过监听 final_report 结束
+	<-ctx.Done()
+	fmt.Println("\n--------------------------------------------------------------------------------")
+	fmt.Println("✅ 任务流执行完毕")
 }
 
 func startLeader(ctx context.Context, rt *app.Runtime, task string) {

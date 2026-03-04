@@ -122,21 +122,35 @@ func (b *BaseAgent) ProtectedHandle(ctx context.Context, msg Message, handler fu
 func (b *BaseAgent) reflectAndLearn(ctx context.Context, taskID string, start time.Time, err error) {
 	if b.reflector == nil || b.learningEngine == nil { return }
 
+	// 为反思过程创建一个子 Span
+	tracer := otel.Tracer("aether-tracer")
+	reflCtx, span := tracer.Start(ctx, "agent.reflection_loop")
+	defer span.End()
+
 	input := reflection.ReflectionInput{
 		AgentName: b.name,
 		TaskID:    taskID,
 		Error:     err,
 		Duration:  time.Since(start),
-		// Cost 通常需要从 Skill 返回的消息中提取，这里简化处理
 	}
 
 	// 执行反思
-	reflectResult, rErr := b.reflector.Reflect(ctx, input)
-	if rErr != nil { return }
+	reflectResult, rErr := b.reflector.Reflect(reflCtx, input)
+	if rErr != nil { 
+		span.RecordError(rErr)
+		return 
+	}
+
+	// 注入元数据到 Span
+	span.SetAttributes(
+		attribute.Bool("reflection.success", reflectResult.Success),
+		attribute.String("reflection.analysis", reflectResult.Analysis),
+		attribute.StringSlice("reflection.suggestions", reflectResult.Suggestions),
+	)
 
 	// 保存反思
 	if b.reflectionStore != nil {
-		_ = b.reflectionStore.Save(ctx, reflectResult)
+		_ = b.reflectionStore.Save(reflCtx, reflectResult)
 	}
 
 	// 更新策略
