@@ -10,12 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nikkofu/aether/internal/core/agent"
-	"github.com/nikkofu/aether/internal/ports/cli"
-	"github.com/nikkofu/aether/internal/core/cluster"
-	"github.com/nikkofu/aether/internal/pkg/config"
-	"github.com/nikkofu/aether/internal/pkg/observability/otel"
-	"github.com/nikkofu/aether/internal/runtime"
+	"github.com/nikkofu/aether/internal/domain/agent"
+	"github.com/nikkofu/aether/internal/delivery/cli"
+	"github.com/nikkofu/aether/internal/usecase/cluster"
+	"github.com/nikkofu/aether/pkg/config"
+	"github.com/nikkofu/aether/pkg/observability/otel"
+	"github.com/nikkofu/aether/internal/app"
 )
 
 func main() {

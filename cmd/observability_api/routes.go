@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nikkofu/aether/internal/pkg/observability/graph"
-	"github.com/nikkofu/aether/internal/pkg/observability/metrics"
-	"github.com/nikkofu/aether/internal/pkg/observability/trace"
+	"github.com/nikkofu/aether/pkg/observability/graph"
+	"github.com/nikkofu/aether/pkg/observability/metrics"
+	"github.com/nikkofu/aether/pkg/observability/trace"
 )
 
 func setupRoutes(engine *trace.TraceEngine, metricsEngine *metrics.MetricsEngine) *http.ServeMux {
