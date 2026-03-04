@@ -16,11 +16,11 @@ import (
 
 // PipelineHandler 处理与流水线相关的命令行指令。
 type PipelineHandler struct {
-	runtime *runtime.Runtime
+	runtime *app.Runtime
 }
 
 // NewPipelineHandler 创建一个新的 PipelineHandler。
-func NewPipelineHandler(rt *runtime.Runtime) *PipelineHandler {
+func NewPipelineHandler(rt *app.Runtime) *PipelineHandler {
 	return &PipelineHandler{
 		runtime: rt,
 	}

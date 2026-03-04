@@ -9,10 +9,10 @@ import (
 
 // HealthCheckHandler 提供系统的健康状态报告。
 type HealthCheckHandler struct {
-	rt *runtime.Runtime
+	rt *app.Runtime
 }
 
-func NewHealthCheckHandler(rt *runtime.Runtime) *HealthCheckHandler {
+func NewHealthCheckHandler(rt *app.Runtime) *HealthCheckHandler {
 	return &HealthCheckHandler{rt: rt}
 }
 
@@ -54,7 +54,7 @@ func (h *HealthCheckHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // StartHealthServer 启动健康检查 HTTP 服务。
-func StartHealthServer(addr string, rt *runtime.Runtime) error {
+func StartHealthServer(addr string, rt *app.Runtime) error {
 	http.Handle("/health", NewHealthCheckHandler(rt))
 	http.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

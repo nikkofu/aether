@@ -36,7 +36,7 @@ func main() {
 	flag.Parse()
 	if *modeFlag != "" { cfg.App.Mode = *modeFlag }
 
-	rt := runtime.NewDefaultRuntime(cfg)
+	rt := app.NewDefaultRuntime(cfg)
 	defer rt.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -52,7 +52,7 @@ func main() {
 	}
 }
 
-func handleSingle(ctx context.Context, rt *runtime.Runtime, args []string) {
+func handleSingle(ctx context.Context, rt *app.Runtime, args []string) {
 	if len(args) < 1 {
 		printUsage()
 		return
@@ -76,7 +76,7 @@ func handleSingle(ctx context.Context, rt *runtime.Runtime, args []string) {
 	}
 }
 
-func handleKnowledge(ctx context.Context, rt *runtime.Runtime, args []string) {
+func handleKnowledge(ctx context.Context, rt *app.Runtime, args []string) {
 	if len(args) < 1 {
 		fmt.Println("用法: aether knowledge <query|relations> [arguments]")
 		return
@@ -100,7 +100,7 @@ func handleKnowledge(ctx context.Context, rt *runtime.Runtime, args []string) {
 	}
 }
 
-func handleExport(ctx context.Context, rt *runtime.Runtime, args []string) {
+func handleExport(ctx context.Context, rt *app.Runtime, args []string) {
 	if len(args) < 1 {
 		fmt.Println("用法: aether export <audit|ledger|proposals> --org=<id>")
 		return
@@ -129,7 +129,7 @@ func handleExport(ctx context.Context, rt *runtime.Runtime, args []string) {
 	printJSON(data)
 }
 
-func handleStrategic(ctx context.Context, rt *runtime.Runtime, args []string) {
+func handleStrategic(ctx context.Context, rt *app.Runtime, args []string) {
 	if len(args) < 1 { return }
 	switch args[0] {
 	case "vision":
@@ -162,7 +162,7 @@ func printJSON(data any) {
 	fmt.Println(string(b))
 }
 
-func handleRun(rt *runtime.Runtime, args []string) {
+func handleRun(rt *app.Runtime, args []string) {
 	runCmd := flag.NewFlagSet("run", flag.ExitOnError)
 	adapter := runCmd.String("adapter", "gemini", "适配器")
 	runCmd.Parse(args)
@@ -171,14 +171,14 @@ func handleRun(rt *runtime.Runtime, args []string) {
 	fmt.Println(res)
 }
 
-func startLeader(ctx context.Context, rt *runtime.Runtime, task string) {
+func startLeader(ctx context.Context, rt *app.Runtime, task string) {
 	la := &leaderAgent{BaseAgent: *agent.NewBaseAgent("leader", "system-leader"), scheduler: cluster.NewScheduler(rt.Logger(), rt.Ledger(), nil)} // Guard 为 nil
 	rt.GetBus().Subscribe(la)
 	rt.StartAgents(ctx)
 	<-ctx.Done()
 }
 
-func startWorker(ctx context.Context, rt *runtime.Runtime, role, nodeID string) {
+func startWorker(ctx context.Context, rt *app.Runtime, role, nodeID string) {
 	if err := rt.InitAgent(role); err != nil { return }
 	cluster.StartWorkerHeartbeat(ctx, rt.GetBus(), role, nodeID, rt.Logger())
 	rt.StartAgents(ctx)
