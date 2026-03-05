@@ -8,24 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.8.0-rc1] - 2026-03-05
 
 ### Added
-- **Enterprise-Grade Observability (Jaeger/OTel Integration)**:
-  - Full OpenTelemetry (OTel) instrumentation for all Agent and Skill executions.
-  - Automatic Trace-Log correlation: Every `Zap` log now includes the current `trace_id` and `span_id`.
-  - Rich Span Attributes: Captured full input/output snapshots (JSON) in Jaeger for all LLM and DAG nodes.
-- **Real-time Stream Feedback (Typewriter Effect)**:
-  - Implemented a unified asynchronous token broadcast system via `Bus`.
-  - `Aether CLI` now supports real-time, zero-latency streaming feedback from Ollama/OpenAI.
-- **Agentic Self-Healing & Robustness**:
-  - Refactored `OllamaAdapter` to use `json.Decoder` for non-blocking stream parsing, resolving `Scanner` hang issues.
-  - Implemented `ProtectedHandle` in `BaseAgent` with panic recovery and fault-injection tracing.
-  - Added "First Byte" pre-warming logic to CLI task execution for high-reliability startup.
-- **Command-Line Parametrization**:
-  - Introduced `aether task "<description>"` for one-shot, autonomous goal execution without YAML.
-  - Supported `--input '{"key": "val"}'` for dynamic pipeline variable injection.
+- **Full-Stack Observability**: Integrated OpenTelemetry for end-to-end agentic workflow tracing.
+- **Trace-Log Correlation**: Automatic injection of TraceID and SpanID into structured logs (Zap).
+- **Asynchronous Token Stream**: High-performance token broadcasting via Bus for real-time CLI feedback.
+- **Robustness & Self-Healing**: Implemented panic recovery and JSON-based fault injection analysis in Agent handlers.
+- **Native Ollama Optimization**: Enhanced streaming performance via `json.Decoder` based chunk parsing.
 
 ### Changed
-- **Config Schema Unified**: Refactored `Config` struct and `config.yaml` to remove deep nesting and hardcoded model fallbacks.
-- **Bootstrap Logic**: `Runtime` now enforces strict model selection, eliminating silent 404 failures.
+- **Unified Configuration**: Flattened configuration schema for better maintainability and environment parity.
+- **Bootstrap Hardening**: Enforced strict capability registration to prevent silent initialization failures.
 
 ### Fixed
 - Fixed nil pointer dereferences in `PlannerAgent` when `Tracer` or `Manager` was partially initialized.

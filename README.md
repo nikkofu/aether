@@ -1,83 +1,53 @@
-# Aether: Enterprise-Grade Agentic OS 🚀
+# Aether: Autonomous Agentic OS 🚀
 
-Aether 是一个基于 Go 语言构建的**企业级多智能体操作系统（MAS-OS）**。它采用 Clean Architecture 架构，旨在为企业提供可观测、可管控、自净化的 AI 智能体协作环境。
-
----
-
-## ✨ 核心特性
-
-- **🤖 多智能体协同 (MAS)**：内置 Supervisor, Planner, Coder, Reviewer 等角色，模拟真实组织架构执行复杂任务。
-- **📊 工业级可观测性**：深度集成 OpenTelemetry (OTel) 与 Jaeger。支持全链路 TraceID 追踪，且日志与链路自动关联。
-- **🛡️ 治理与安全 (Governance)**：基于数字宪法（Constitution）和风险护栏（Risk Guard）的执行策略，支持人机领航（Human-in-the-Loop）。
-- **⚡ 实时流式反馈**：支持 Ollama/OpenAI 的实时流式输出，CLI 端具备打字机回显效果，告别“黑盒”等待。
-- **🏠 本地优先 (Local-First)**：深度适配 Ollama (Qwen 3.5/2.5)，支持完全离线的隐私安全环境。
-- **🛠️ 动态能力加载 (WASM)**：支持通过 WebAssembly 动态加载扩展 Skill，实现逻辑隔离与按需热更新。
+Aether 是一个基于 Go 语言构建的**自主多智能体操作系统（MAS-OS）**。项目遵循 **Clean Architecture** 准则，旨在探索在高度动态环境下，AI 智能体集群的可观测性、自愈性与治理边界。
 
 ---
 
-## 🏗️ 系统架构
+## 🎨 核心哲学
 
-Aether 遵循 **Clean Architecture** 准则，分为以下层次：
-- **Domain**: 核心业务逻辑、智能体状态机、治理规则。
-- **Usecase**: DAG 执行引擎、学习引擎、反射闭环。
-- **Infrastructure**: LLM 适配器 (Ollama/OpenAI)、NATS 总线、SQLite 存储。
-- **Delivery**: 企业级 CLI (`aether task`)、REST API、Web UI。
+- **🧩 架构即艺术**：严格的领域驱动设计（DDD），确保系统在复杂任务流下依然保持逻辑的纯粹与解耦。
+- **👁️ 全透明执行**：深度集成 OpenTelemetry (OTel)，将 Agent 的“思维链路”物化为可感知的追踪图谱。
+- **🌀 自主进化循环**：通过执行-反射-学习的闭环设计，使系统具备处理不确定性异常的自愈能力。
+- **🔌 动态能力边界**：利用 WebAssembly (WASM) 插件机制，实现 Agent 技能的零停机热扩展。
 
 ---
 
-## 🚀 快速开始
+## ✨ 系统特性
 
-### 1. 准备环境
-- 安装 [Go 1.22+](https://go.dev/)
-- 启动本地 [Ollama](https://ollama.com/) 并拉取模型：`ollama pull qwen3.5:0.8b`
-- （可选）启动 Jaeger 进行链路监控：
-  ```bash
-  docker run -d --name jaeger \
-    -e COLLECTOR_OTLP_ENABLED=true \
-    -p 16686:16686 -p 4317:4317 -p 4318:4318 \
-    jaegertracing/all-in-one:latest
-  ```
+- **🤖 多智能体协同**：内置 Supervisor, Planner, Coder, Reviewer 等角色，模拟组织化任务拆解。
+- **📊 工业级可观测性**：链路追踪与结构化日志自动关联，支持 Jaeger 实时监控。
+- **⚡ 实时流式反馈**：基于异步总线的 Token 广播，提供极致的 CLI 打字机交互体验。
+- **🏠 本地化安全**：深度适配 Ollama 离线模型，保护数据主权与隐私。
 
-### 2. 编译并运行
+---
+
+## 🏗️ 快速开始
+
+### 1. 环境准备
+- **Go 1.22+**
+- **Ollama**: `ollama pull qwen3.5:0.8b`
+- **Jaeger** (可选): 用于可视化执行链路。
+
+### 2. 编译并执行
 ```bash
-# 编译二进制文件
+# 编译
 go build -o aether cmd/aether/main.go
 
-# 执行一个复杂的参数化任务
+# 下发自主任务
 ./aether task "Design a Pet Store API with Go and Fiber!"
 ```
 
-### 3. 查看追踪
-访问 **http://localhost:16686**，搜索 Service 为 `aether-core`。你将看到每一个 Agent 思考、执行、报错、自愈的全过程。
+---
+
+## 🛠️ 技术内幕：自愈架构设计
+
+在 Aether 的设计中，异常被视为系统进化的养料：
+1. **执行快照**：每一个推理节点的 Input/Output 都会被实时序列化并作为 Span 属性持久化。
+2. **故障自省**：当捕获到 Panic 或逻辑错误时，Reflection 引擎会自动回溯 Trace 属性中的故障现场。
+3. **策略修正**：系统基于故障快照动态调整 Prompt 权重或重试策略，实现无人值守的闭环修复。
 
 ---
 
-## 🛠️ 配置说明 (`configs/config.yaml`)
-
-```yaml
-app:
-  mode: "single" # single/cluster
-  role: "supervisor"
-
-ollama:
-  base_url: "http://localhost:11434"
-  model: "qwen3.5:0.8b" # 推荐本地超轻量模型
-  timeout: "300s"
-
-otel:
-  endpoint: "localhost:4317" # Jaeger OTLP 地址
-```
-
----
-
-## 📈 面试亮点：Agentic 自愈设计
-
-在 Aether 中，报错不再是终点：
-1. **Trace 快照**：系统自动将 LLM 的原始响应 (Raw Response) 捕获并存入 Span 属性。
-2. **反射闭环**：当执行器捕获到 Panic 或 404 异常时，会自动触发 `Reflection` 智能体。
-3. **数据驱动自愈**：Reflection 智能体通过 TraceID 提取故障快照，动态修正 Prompt 策略并触发重新执行。
-
----
-
-## 📄 开源协议
+## 📄 协议
 本项目采用 [MIT License](LICENSE) 协议。
