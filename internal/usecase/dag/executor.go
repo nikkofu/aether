@@ -2,6 +2,7 @@ package dag
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/nikkofu/aether/internal/domain/capability"
 	"github.com/nikkofu/aether/internal/core/memory"
 	"github.com/nikkofu/aether/pkg/observability"
+	"github.com/nikkofu/aether/pkg/logging"
 	"github.com/nikkofu/aether/internal/domain/policy"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -24,12 +26,13 @@ type PipelineExecutor struct {
 	policy     policy.Policy
 	memory     memory.Store
 	tracer     observability.Tracer
+	logger     logging.Logger
 	maxWorkers int
 	eventChan  chan ExecutionEvent
 	once       sync.Once
 }
 
-func NewPipelineExecutor(reg *capability.CapabilityRegistry, pol policy.Policy, mem memory.Store, tracer observability.Tracer, workers int) *PipelineExecutor {
+func NewPipelineExecutor(reg *capability.CapabilityRegistry, pol policy.Policy, mem memory.Store, tracer observability.Tracer, log logging.Logger, workers int) *PipelineExecutor {
 	if workers <= 0 {
 		workers = 5
 	}
@@ -42,6 +45,7 @@ func NewPipelineExecutor(reg *capability.CapabilityRegistry, pol policy.Policy, 
 		policy:     pol,
 		memory:     mem,
 		tracer:     tracer,
+		logger:     log,
 		maxWorkers: workers,
 		eventChan:  make(chan ExecutionEvent, 100),
 	}
@@ -82,6 +86,10 @@ func (e *PipelineExecutor) Execute(ctx context.Context, p *Pipeline) (map[string
 	defer cancel()
 
 	results := make(map[string]map[string]any)
+	if p.InitialData != nil {
+		// 关键：将 CLI 的参数注入到 'input' 虚拟节点下，供其他节点通过 {{input.key}} 引用
+		results["input"] = p.InitialData
+	}
 	var mu sync.RWMutex
 
 	pipelineExecutionID := uuid.New().String()
@@ -150,15 +158,24 @@ func (e *PipelineExecutor) Execute(ctx context.Context, p *Pipeline) (map[string
 
 					input, err := e.resolveValue(nodeID, node.Input, data)
 					if err != nil {
+						nodeSpan.RecordError(err)
+						nodeSpan.SetStatus(codes.Error, "resolve input failed")
 						e.handleNodeFailure(nodeID, startTime, err, errCh, cancel)
 						return
 					}
 					inputMap := input.(map[string]any)
+					
+					// 注入输入参数快照到 Span
+					inputJSON, _ := json.Marshal(inputMap)
+					nodeSpan.SetAttributes(attribute.String("node.input", string(inputJSON)))
 
 					evalCtx := policy.EvaluationContext{NodeID: nodeID, Skill: node.Skill, Input: inputMap}
 					decision, err := e.policy.Evaluate(nodeCtx, evalCtx)
 					if err != nil || decision != policy.DecisionAllow {
-						e.handleNodeFailure(nodeID, startTime, fmt.Errorf("policy blocked: %v", decision), errCh, cancel)
+						err := fmt.Errorf("policy blocked execution: %v", decision)
+						nodeSpan.RecordError(err)
+						nodeSpan.SetStatus(codes.Error, err.Error())
+						e.handleNodeFailure(nodeID, startTime, err, errCh, cancel)
 						return
 					}
 
@@ -175,9 +192,22 @@ func (e *PipelineExecutor) Execute(ctx context.Context, p *Pipeline) (map[string
 					if err != nil {
 						nodeSpan.RecordError(err)
 						nodeSpan.SetStatus(codes.Error, err.Error())
+						// 记录失败时的上下文到日志
+						if e.logger != nil {
+							e.logger.Error(nodeCtx, "节点执行失败", 
+								logging.String("node_id", nodeID),
+								logging.String("skill", node.Skill),
+								logging.Err(err),
+								logging.String("input", string(inputJSON)),
+							)
+						}
 						e.handleNodeFailure(nodeID, startTime, err, errCh, cancel)
 						return
 					}
+					
+					// 注入输出结果快照到 Span
+					outputJSON, _ := json.Marshal(output)
+					nodeSpan.SetAttributes(attribute.String("node.output", string(outputJSON)))
 					nodeSpan.SetStatus(codes.Ok, "success")
 
 					if e.memory != nil {

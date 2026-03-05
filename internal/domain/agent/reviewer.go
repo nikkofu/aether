@@ -33,31 +33,50 @@ func (a *ReviewerAgent) Handle(ctx context.Context, msg Message) ([]Message, err
 	return a.ProtectedHandle(ctx, msg, func() ([]Message, error) {
 		if a.tracer != nil {
 			var span observability.Span
-			ctx, span = a.tracer.StartSpan(ctx, "Reviewer.Handle", map[string]any{"type": msg.Type})
+			ctx, span = a.tracer.StartSpan(ctx, "Reviewer.Handle", map[string]any{
+				"task": msg.Payload["task"],
+			})
 			defer span.End()
+
+			if msg.Type != "review_request" { return nil, nil }
+
+			code := msg.Payload["code"].(string)
+			task := msg.Payload["task"].(string)
+
+			prompt := fmt.Sprintf("作为高级架构师，请评审针对任务 '%s' 的代码，给出详细意见并判定是否通过：\n%s", task, code)
+			
+			// 记录 LLM 调用
+			llmCtx, llmSpan := a.tracer.StartSpan(ctx, "Reviewer.LLM_Inference", map[string]any{
+				"code_to_review": code,
+			})
+			output, err := a.llmSkill.Execute(llmCtx, map[string]any{"prompt": prompt, "agent_name": a.name})
+			if err != nil {
+				llmSpan.End()
+				return nil, err
+			}
+			review, _ := output["output"].(string)
+			llmSpan.End()
+
+			// 记录评审结果
+			_, resSpan := a.tracer.StartSpan(ctx, "Reviewer.Result", map[string]any{
+				"review_feedback": review,
+			})
+			resSpan.End()
+
+			// 逻辑：向 Coder 反馈评审结果
+			return []Message{{
+				From:      a.name,
+				To:        msg.From, // 回复给 Coder
+				Type:      "review_result",
+				Timestamp: time.Now(),
+				Payload: map[string]any{
+					"approved": true, // 简化逻辑，暂定为 true
+					"feedback": review,
+					"code":     code,
+				},
+			}}, nil
 		}
-
-		if msg.Type != "review_request" { return nil, nil }
-
-		code := msg.Payload["code"].(string)
-		task := msg.Payload["task"].(string)
-
-		input := map[string]any{
-			"prompt":     fmt.Sprintf("评审针对任务 '%s' 的代码：\n%s", task, code),
-			"agent_name": a.name,
-		}
-
-		output, err := a.llmSkill.Execute(ctx, input)
-		if err != nil { return nil, err }
-
-		review, _ := output["output"].(string)
-
-		return []Message{{
-			From:      a.name,
-			Type:      "final_report",
-			Timestamp: time.Now(),
-			Payload:   map[string]any{"review": review, "code": code},
-		}}, nil
+		return nil, nil
 	})
 }
 

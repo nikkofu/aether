@@ -6,7 +6,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"github.com/nikkofu/aether/pkg/observability"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Field 是 zap.Field 的别名。
@@ -71,16 +71,21 @@ func NewLogger(cfg Config) (*ZapLogger, error) {
 	return &ZapLogger{l: l}, nil
 }
 
-// extractTraceInfo 从 context 中提取追踪信息。
+// extractTraceInfo 从 context 中提取 OpenTelemetry 的追踪信息。
 func (zl *ZapLogger) extractTraceInfo(ctx context.Context) []Field {
 	if ctx == nil {
 		return nil
 	}
 	
-	fields := make([]Field, 0, 1)
-	if traceID, ok := ctx.Value(observability.TraceKey).(string); ok {
-		fields = append(fields, zap.String("trace_id", traceID))
+	span := trace.SpanFromContext(ctx)
+	if !span.SpanContext().IsValid() {
+		return nil
 	}
+
+	fields := make([]Field, 0, 2)
+	fields = append(fields, zap.String("trace_id", span.SpanContext().TraceID().String()))
+	fields = append(fields, zap.String("span_id", span.SpanContext().SpanID().String()))
+	
 	return fields
 }
 

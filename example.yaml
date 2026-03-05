@@ -3,7 +3,7 @@ nodes:
     skill: llm
     input:
       adapter: gemini
-      prompt: "Design a simple REST API for a todo app"
+      prompt: "Design a simple architecture for: {{input.goal}}"
 
   - id: implement
     skill: llm
@@ -11,3 +11,5 @@ nodes:
     input:
       adapter: gemini
       prompt: "Based on this plan:\n{{plan.output}}\nImplement in Go."
+initial_data:
+  goal: "default task"

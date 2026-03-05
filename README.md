@@ -1,90 +1,83 @@
-# Aether
+# Aether: Enterprise-Grade Agentic OS 🚀
 
-> Agentic Engineering Orchestration System (AEOS)
-
-Aether 是一个基于多智能体协作、具备高度可观测性和政策驱动能力的 AI 工程编排系统。它不仅仅是一个 LLM Wrapper，更是为了构建自动化的“AI 工程师团队”而设计的底层操作系统。
+Aether 是一个基于 Go 语言构建的**企业级多智能体操作系统（MAS-OS）**。它采用 Clean Architecture 架构，旨在为企业提供可观测、可管控、自净化的 AI 智能体协作环境。
 
 ---
 
-## 核心特性
+## ✨ 核心特性
 
-- **多智能体编排 (Multi-Agent Orchestration)**: 内置 `Planner`, `Coder`, `Reviewer`, `Sentinel` 等专门角色的智能体，通过 `Manager` 和 `Supervisor` 进行协调。
-- **本地优先的大模型驱动 (Default Ollama)**: 原生集成并默认使用 Ollama 适配器（推荐 `qwen3.5:0.8b`），支持 100% 本地化、隐私安全且零成本的 AI 任务执行，无需依赖云端 API。
-- **DAG 任务执行与可视化**: 基于有向无环图的任务流转，支持复杂的任务依赖和并行处理，内置 Mermaid.js 格式图表导出 (`Pipeline.ToMermaid`) 用于透明化调试。
-- **可观测性 (Observability)**: 深度集成 OpenTelemetry，内置 Tracing 和 Metrics 系统，对每一个 Decision-to-Execution 链路进行全审计。
-- **可扩展能力集 (Capabilities)**: 包含文件管理、日历、邮件、搜索、告警等多种原子能力，并支持通过 WASM 动态从远程扩展和加载 Skill。
-- **跨语言能力自动编译 (Polyglot Skill Compiler)**: 允许用户直接提供 Python、JS 等第三方语言代码，系统通过内置 LLM 自动将其转化为标准的 WASI Go 代码并瞬间编译为底层的 WASM 插件，实现零门槛的能力扩充。
-- **治理与政策 (Governance & Policy)**: 具备基于投票的 DAO-like 治理委员会与自动执行的 `Policy Engine`，确保 AI 行为在安全边界内运行。
-- **竞标经济调度系统 (Bidding Economy)**: 引入了基于博弈论的任务分配机制。Agent 之间会基于当前负载、信誉度（Reputation）和预估成本对任务进行“公开竞标”，Scheduler 综合评估选出性价比最高的节点执行，优化了大规模集群下的资源利用率。
-- **Web UI 2.0 (实时遥测仪表盘)**: 充满极客风格的现代前端监控面板，通过 SSE (Server-Sent Events) 与 `aetherd` 守护进程实时通讯，提供 Agent 竞标、任务下发、系统告警等全局总线事件的毫秒级可视化追踪。
-- **跨任务长程工程记忆 (Long-term Memory)**: 基于 Lite RAG 技术，智能体能够自动回顾过去相似任务的成功经验与失败教训（Reflections），实现“一次掉坑，终身免疫”的自主进化能力。
-- **事件驱动的自主守护进程 (Auto-Healing Daemon)**: 独立提供 `aetherd` 守护进程，可监听 GitHub 等平台的 Webhook 事件（如 Issue 创建），自动唤醒智能体集群进行代码分析与修复，实现“永不疲倦的 AI 队友”。
+- **🤖 多智能体协同 (MAS)**：内置 Supervisor, Planner, Coder, Reviewer 等角色，模拟真实组织架构执行复杂任务。
+- **📊 工业级可观测性**：深度集成 OpenTelemetry (OTel) 与 Jaeger。支持全链路 TraceID 追踪，且日志与链路自动关联。
+- **🛡️ 治理与安全 (Governance)**：基于数字宪法（Constitution）和风险护栏（Risk Guard）的执行策略，支持人机领航（Human-in-the-Loop）。
+- **⚡ 实时流式反馈**：支持 Ollama/OpenAI 的实时流式输出，CLI 端具备打字机回显效果，告别“黑盒”等待。
+- **🏠 本地优先 (Local-First)**：深度适配 Ollama (Qwen 3.5/2.5)，支持完全离线的隐私安全环境。
+- **🛠️ 动态能力加载 (WASM)**：支持通过 WebAssembly 动态加载扩展 Skill，实现逻辑隔离与按需热更新。
 
 ---
 
-## 项目结构
+## 🏗️ 系统架构
 
-```text
-.
-├── cmd/                # 应用程序入口
-│   ├── aether/         # CLI 客户端
-│   ├── aetherd/        # Webhook 事件驱动守护进程
-│   └── observability_api/ # 可观测性服务
+Aether 遵循 **Clean Architecture** 准则，分为以下层次：
+- **Domain**: 核心业务逻辑、智能体状态机、治理规则。
+- **Usecase**: DAG 执行引擎、学习引擎、反射闭环。
+- **Infrastructure**: LLM 适配器 (Ollama/OpenAI)、NATS 总线、SQLite 存储。
+- **Delivery**: 企业级 CLI (`aether task`)、REST API、Web UI。
 
-├── internal/           # 私有业务逻辑
-│   ├── domain/         # 领域模型与接口 (Entities & Repository Interfaces)
-│   ├── usecase/        # 业务逻辑编排 (Orchestration & Application Services)
-│   ├── infrastructure/ # 外部基础设施实现 (LLM Clients, WASM Sandbox, DB)
-│   ├── app/            # 应用程序引导 (Dependency Injection & Lifecycle)
-│   └── delivery/       # 交付层入口 (CLI Commands, API Handlers)
-├── pkg/                # 公共基础库 (可被外部项目引用的解耦组件)
-│   ├── bus/            # 分布式事件总线
-│   ├── logging/        # 结构化日志
-│   └── observability/  # Tracing 与 Metrics 核心
-├── deployments/        # 部署配置 (Docker, K8s)
-├── web-ui/             # 基于 React 的管理前端
-└── configs/            # 配置文件
+---
+
+## 🚀 快速开始
+
+### 1. 准备环境
+- 安装 [Go 1.22+](https://go.dev/)
+- 启动本地 [Ollama](https://ollama.com/) 并拉取模型：`ollama pull qwen3.5:0.8b`
+- （可选）启动 Jaeger 进行链路监控：
+  ```bash
+  docker run -d --name jaeger \
+    -e COLLECTOR_OTLP_ENABLED=true \
+    -p 16686:16686 -p 4317:4317 -p 4318:4318 \
+    jaegertracing/all-in-one:latest
+  ```
+
+### 2. 编译并运行
+```bash
+# 编译二进制文件
+go build -o aether cmd/aether/main.go
+
+# 执行一个复杂的参数化任务
+./aether task "Design a Pet Store API with Go and Fiber!"
+```
+
+### 3. 查看追踪
+访问 **http://localhost:16686**，搜索 Service 为 `aether-core`。你将看到每一个 Agent 思考、执行、报错、自愈的全过程。
+
+---
+
+## 🛠️ 配置说明 (`configs/config.yaml`)
+
+```yaml
+app:
+  mode: "single" # single/cluster
+  role: "supervisor"
+
+ollama:
+  base_url: "http://localhost:11434"
+  model: "qwen3.5:0.8b" # 推荐本地超轻量模型
+  timeout: "300s"
+
+otel:
+  endpoint: "localhost:4317" # Jaeger OTLP 地址
 ```
 
 ---
 
-## 快速开始
+## 📈 面试亮点：Agentic 自愈设计
 
-### 环境依赖
-
-- Go 1.21+
-- Node.js 18+
-- SQLite (本地存储)
-- NATS (可选，分布式部署需要)
-
-### 编译运行
-
-1. **编译后端**:
-   ```bash
-   go build -o aether ./cmd/aether
-   ./aether --config configs/config.example.yaml
-   ```
-
-2. **启动 Web UI**:
-   ```bash
-   cd web-ui
-   npm install
-   npm run dev
-   ```
+在 Aether 中，报错不再是终点：
+1. **Trace 快照**：系统自动将 LLM 的原始响应 (Raw Response) 捕获并存入 Span 属性。
+2. **反射闭环**：当执行器捕获到 Panic 或 404 异常时，会自动触发 `Reflection` 智能体。
+3. **数据驱动自愈**：Reflection 智能体通过 TraceID 提取故障快照，动态修正 Prompt 策略并触发重新执行。
 
 ---
 
-## 路线图
-
-- [x] 多智能体基础架构 (Agent Skeletion)
-- [x] 可观测性系统 (Tracing & Metrics)
-- [x] 基础能力集实现
-- [x] 分布式调度系统 (NATS based)
-- [x] WASM Skill 动态加载
-- [x] 治理委员会投票系统 (DAO-like Governance)
-
----
-
-## License
-
-Apache-2.0
+## 📄 开源协议
+本项目采用 [MIT License](LICENSE) 协议。

@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -79,6 +81,10 @@ func (b *BaseAgent) Metadata() map[string]any {
 
 // ProtectedHandle 是一个包装器，增加了 Panic Recovery 和反思闭环。
 func (b *BaseAgent) ProtectedHandle(ctx context.Context, msg Message, handler func() ([]Message, error)) (res []Message, err error) {
+	if os.Getenv("AETHER_LOG_LEVEL") == "debug" {
+		fmt.Fprintf(os.Stderr, "⚡ [%s] 正在处理消息: %s\n", strings.ToUpper(b.name), msg.Type)
+	}
+
 	// Tracing: agent execution
 	tracer := otel.Tracer("aether-tracer")
 	ctx, span := tracer.Start(ctx, "agent.execute")
@@ -92,6 +98,10 @@ func (b *BaseAgent) ProtectedHandle(ctx context.Context, msg Message, handler fu
 
 	b.SetStatus(StatusRunning)
 	start := time.Now()
+
+	// 增加显式的 Context 超时保护 (10分钟)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
 
 	// 1. Panic Recovery
 	defer func() {

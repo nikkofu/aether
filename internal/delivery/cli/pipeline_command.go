@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"sync"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/nikkofu/aether/internal/usecase/dag"
 	"github.com/nikkofu/aether/internal/app"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // PipelineHandler 处理与流水线相关的命令行指令。
@@ -48,13 +51,32 @@ func (h *PipelineHandler) Handle(ctx context.Context, args []string) {
 
 // runPipeline 读取 YAML 配置文件并执行流水线。
 func (h *PipelineHandler) runPipeline(ctx context.Context, args []string) {
-	if len(args) < 1 {
+	runCmd := flag.NewFlagSet("pipeline run", flag.ExitOnError)
+	inputStr := runCmd.String("input", "", "JSON 格式的输入参数")
+	runCmd.Parse(args)
+
+	remainingArgs := runCmd.Args()
+	if len(remainingArgs) < 1 {
 		fmt.Fprintln(os.Stderr, "错误: 必须指定流水线配置文件路径 (.yaml)")
+		h.printUsage()
 		os.Exit(1)
 	}
-	filePath := args[0]
+	filePath := remainingArgs[0]
 
-	// 1. 读取并解析 YAML
+	// 1. Tracing 增强
+	tracer := otel.Tracer("aether-cli")
+	ctx, span := tracer.Start(ctx, "cli.pipeline_run")
+	span.SetAttributes(
+		attribute.String("pipeline.file", filePath),
+		attribute.String("pipeline.input", *inputStr),
+	)
+	defer span.End()
+
+	traceID := span.SpanContext().TraceID().String()
+	fmt.Fprintf(os.Stderr, "🔍 追踪已启动 (TraceID: %s)\n", traceID)
+	fmt.Fprintf(os.Stderr, "🔗 在 Jaeger 中查看: http://localhost:16686/trace/%s\n", traceID)
+
+	// 2. 读取并解析 YAML
 	fileBytes, err := os.ReadFile(filePath)
 	if err != nil {
 		h.printErrorJSON(fmt.Errorf("读取文件失败: %w", err))
@@ -67,10 +89,26 @@ func (h *PipelineHandler) runPipeline(ctx context.Context, args []string) {
 		os.Exit(1)
 	}
 
-	// 2. 使用 Runtime 创建带策略的执行器
+	// 3. 处理参数化输入：如果提供了 --input，则覆盖 Pipeline 的 InitialData
+	if *inputStr != "" {
+		var inputData map[string]any
+		if err := json.Unmarshal([]byte(*inputStr), &inputData); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  警告: --input 解析 JSON 失败: %v\n", err)
+		} else {
+			if pipeline.InitialData == nil {
+				pipeline.InitialData = make(map[string]any)
+			}
+			for k, v := range inputData {
+				pipeline.InitialData[k] = v
+			}
+			fmt.Fprintf(os.Stderr, "✅ 已加载自定义输入参数: %d 个字段\n", len(inputData))
+		}
+	}
+
+	// 4. 使用 Runtime 创建带策略的执行器
 	executor := h.runtime.NewPipelineExecutor(5)
 
-	// 3. 启动事件监听 Goroutine
+	// 5. 启动事件监听 Goroutine
 	var wg sync.WaitGroup
 	wg.Add(1)
 	startTime := time.Now()
@@ -94,7 +132,7 @@ func (h *PipelineHandler) runPipeline(ctx context.Context, args []string) {
 		}
 	}()
 
-	// 4. 执行流水线
+	// 6. 执行流水线
 	results, err := executor.Execute(ctx, &pipeline)
 	
 	// 等待事件监听协程处理完所有剩余事件
@@ -105,10 +143,11 @@ func (h *PipelineHandler) runPipeline(ctx context.Context, args []string) {
 		os.Exit(1)
 	}
 
-	// 5. 以 JSON 格式打印最终结果到 Stdout
+	// 7. 以 JSON 格式打印最终结果到 Stdout
 	h.printJSON(map[string]any{
-		"status":  "success",
-		"results": results,
+		"status":   "success",
+		"trace_id": traceID,
+		"results":  results,
 	})
 }
 

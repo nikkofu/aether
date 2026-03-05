@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
-	"strings"
+	"os"
 	"time"
 
 	"github.com/nikkofu/aether/internal/domain/capability"
@@ -32,89 +32,71 @@ func (a *PlannerAgent) SetManager(m AgentManager) { a.manager = m }
 func (a *PlannerAgent) SetGraph(g knowledge.Graph) { a.graph = g }
 
 func (a *PlannerAgent) Handle(ctx context.Context, msg Message) ([]Message, error) {
-	// 优先处理系统级消息（如竞标招标）
+	// 1. 处理系统级消息
 	if sysMsgs := a.HandleSystemMessage(ctx, msg); sysMsgs != nil {
 		return sysMsgs, nil
 	}
 
+	// 2. 核心逻辑包装在 ProtectedHandle 中以捕获 Panic
 	return a.ProtectedHandle(ctx, msg, func() ([]Message, error) {
-		if msg.Type != "task_plan_request" { return nil, nil }
+		if msg.Type != "task_plan_request" {
+			return nil, nil
+		}
+
+		// 检查核心依赖，防止 nil pointer
+		if a.llm == nil {
+			return nil, fmt.Errorf("planner agent error: LLM capability is not initialized")
+		}
 
 		description, _ := msg.Payload["description"].(string)
-		orgID, _ := msg.Payload["org_id"].(string)
-		if orgID == "" { orgID = "default" }
-
-		if a.tracer != nil {
-			var span observability.Span
-			ctx, span = a.tracer.StartSpan(ctx, "Planner.Handle", map[string]any{
-				"msg_id":      msg.ID,
-				"description": description,
-			})
-			defer span.End()
-
-			// --- Lite RAG: 检索长程记忆 ---
-			var memoryHints []string
-			if a.graph != nil {
-				searchKey := description
-				if len(searchKey) > 20 { searchKey = searchKey[:20] }
-				
-				entities, _ := a.graph.Search(ctx, orgID, searchKey, 3)
-				for _, e := range entities {
-					if e.Type == "reflection" {
-						analysis, _ := e.Metadata["analysis"].(string)
-						if analysis != "" {
-							memoryHints = append(memoryHints, analysis)
-						}
-					}
-				}
-				if len(memoryHints) > 0 {
-					span.End() // 先结束之前的
-					ctx, span = a.tracer.StartSpan(ctx, "Planner.MemoryRecall", map[string]any{
-						"recalled_memories": memoryHints,
-					})
-				}
-			}
-
-			prompt := fmt.Sprintf("拆解任务：'%s'。按模块分工。", description)
-			if len(memoryHints) > 0 {
-				prompt = fmt.Sprintf("参考以下历史工程经验：\n%s\n\n基于以上经验，拆解当前任务：'%s'。请确保避免过去犯过的错误。", 
-					strings.Join(memoryHints, "\n"), description)
-			}
-
-			// 记录 LLM 调用 Span
-			llmCtx, llmSpan := a.tracer.StartSpan(ctx, "Planner.LLM_Inference", map[string]any{
-				"final_prompt": prompt,
-			})
-			output, err := a.llm.Execute(llmCtx, map[string]any{"prompt": prompt, "agent_name": a.name})
-			if err != nil {
-				llmSpan.End()
-				return nil, err
-			}
-			plan, _ := output["output"].(string)
-			llmSpan.End()
-
-			// 记录最终计划
-			_, finalSpan := a.tracer.StartSpan(ctx, "Planner.Result", map[string]any{
-				"generated_plan": plan,
-			})
-			finalSpan.End()
-
-			if a.manager != nil {
-				a.manager.Spawn(ctx, "coder", map[string]any{"task_id": msg.ID, "plan": plan})
-			}
-
-			return []Message{{
-				From:      a.name,
-				To:        "coder",
-				Type:      "instruction",
-				Timestamp: time.Now(),
-				Payload: map[string]any{
-					"plan": plan,
-					"task": description,
-				},
-			}}, nil
+		if description == "" {
+			return nil, fmt.Errorf("task description is empty")
 		}
-		return nil, nil // 兜底
+
+		fmt.Fprintf(os.Stderr, "\n🧠 [%s] 正在生成执行计划...\n", a.name)
+
+		// 3. 执行 LLM 推理
+		// 增加显式的流式提示，确保我们的 Stream 逻辑能被触发
+		input := map[string]any{
+			"prompt":     fmt.Sprintf("请作为架构师，将以下任务拆解为具体的执行步骤：'%s'。请直接返回步骤列表。", description),
+			"agent_name": a.name,
+			"stream":     true,
+		}
+
+		output, err := a.llm.Execute(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("LLM execution failed: %w", err)
+		}
+
+		// 4. 防御性提取结果
+		if output == nil {
+			return nil, fmt.Errorf("LLM returned nil output")
+		}
+
+		plan, ok := output["output"].(string)
+		if !ok || plan == "" {
+			return nil, fmt.Errorf("LLM did not return a valid plan string")
+		}
+
+		// 5. 生成后续指令（如果 Manager 已注入）
+		// 注意：即便没有 Manager，我们也返回成功的消息列表，让总线继续流转
+		resMsg := Message{
+			From:      a.name,
+			To:        "coder",
+			Type:      "instruction",
+			Timestamp: time.Now(),
+			Payload: map[string]any{
+				"plan": plan,
+				"task": description,
+			},
+		}
+
+		// 如果 Manager 存在，则尝试 Spawn 一个 Coder
+		if a.manager != nil {
+			_ , _ = a.manager.Spawn(ctx, "coder", map[string]any{"task_id": msg.ID, "plan": plan})
+		}
+
+		return []Message{resMsg}, nil
 	})
 }
 

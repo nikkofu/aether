@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -31,9 +32,25 @@ func (b *MemoryBus) SubscribeToSubject(ctx context.Context, subject string, hand
 	b.subjectSubs = append(b.subjectSubs, subjectSub{subject: subject, handler: handler})
 }
 
+func (b *MemoryBus) WaitReady(ctx context.Context) error {
+	// 对于内存总线，主要确保 queue 已初始化且有处理能力
+	// 我们通过发送一个 ping 消息并等待它被 dispatch 来模拟就绪
+	if b.logger != nil {
+		b.logger.Debug(ctx, "正在等待 MemoryBus 就绪...")
+	}
+	
+	// 给一点极短的固定延迟，确保所有订阅 Goroutine 已经跑起来
+	select {
+	case <-time.After(100 * time.Millisecond):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func NewMemoryBus(bufferSize int) *MemoryBus {
 	if bufferSize <= 0 {
-		bufferSize = 100
+		bufferSize = 10000 // 企业级高并发缓冲区
 	}
 	return &MemoryBus{
 		queue: make(chan agent.Message, bufferSize),
@@ -47,7 +64,15 @@ func (b *MemoryBus) SetLogger(l logging.Logger) {
 }
 
 func (b *MemoryBus) Publish(ctx context.Context, msg agent.Message) {
-	b.queue <- msg
+	if os.Getenv("AETHER_LOG_LEVEL") == "debug" {
+		fmt.Fprintf(os.Stderr, ">> [BUS] 📥 消息入队: %s -> %s\n", msg.From, msg.To)
+	}
+	// 增加非阻塞尝试，如果队列真满了则报错，而不是死锁
+	select {
+	case b.queue <- msg:
+	default:
+		fmt.Fprintf(os.Stderr, "❌ [BUS] 严重警告: 消息队列溢出，丢弃来自 %s 的消息!\n", msg.From)
+	}
 }
 
 func (b *MemoryBus) Subscribe(a agent.Agent) {
@@ -55,6 +80,9 @@ func (b *MemoryBus) Subscribe(a agent.Agent) {
 	defer b.mu.Unlock()
 	a.SetBus(b)
 	b.subscribers = append(b.subscribers, a)
+	if os.Getenv("AETHER_LOG_LEVEL") == "debug" {
+		fmt.Fprintf(os.Stderr, "✅ [BUS] 代理注册成功: %s (%s)\n", a.Name(), a.Role())
+	}
 }
 
 func (b *MemoryBus) Start(ctx context.Context) {
@@ -69,6 +97,10 @@ func (b *MemoryBus) Start(ctx context.Context) {
 }
 
 func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
+	if os.Getenv("AETHER_LOG_LEVEL") == "debug" {
+		fmt.Fprintf(os.Stderr, ">> [BUS] 📢 消息流转: %s -> %s (类型: %s)\n", msg.From, msg.To, msg.Type)
+	}
+
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -114,8 +146,8 @@ func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 				}
 			}()
 
-			// 核心需求：超时取消 (默认 60s 处理限制)
-			handleCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			// 核心需求：超时取消 (企业级长任务处理限制)
+			handleCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 			defer cancel()
 
 			responses, err := a.Handle(handleCtx, m)

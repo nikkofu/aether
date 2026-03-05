@@ -14,7 +14,8 @@ type Node struct {
 
 // Pipeline 定义了一组具有依赖关系的节点。
 type Pipeline struct {
-	Nodes []Node `json:"nodes" yaml:"nodes"`
+	Nodes       []Node         `json:"nodes" yaml:"nodes"`
+	InitialData map[string]any `json:"initial_data" yaml:"initial_data"`
 }
 
 // Validate 对 Pipeline 进行全面校验，包括唯一性、依赖合法性和环检测。

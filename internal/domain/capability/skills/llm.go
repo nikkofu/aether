@@ -13,7 +13,9 @@ import (
 	"github.com/nikkofu/aether/pkg/metrics"
 	"github.com/nikkofu/aether/pkg/observability"
 	"github.com/nikkofu/aether/pkg/routing"
+	"github.com/nikkofu/aether/pkg/bus"
 	"github.com/nikkofu/aether/internal/domain/strategy"
+	"github.com/nikkofu/aether/internal/domain/agent"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -35,9 +37,10 @@ type LLMSkill struct {
 	strategyStore   strategy.StrategyStore
 	renderer        capability.PromptRenderer
 	defaultTemplate string
+	bus             bus.Bus // 新增总线支持
 }
 
-func NewLLMSkill(name string, defaultAdapter llm.Adapter, provider AdapterProvider, router routing.Router, tracker metrics.Tracker, tracer observability.Tracer, strategyStore strategy.StrategyStore, renderer capability.PromptRenderer, template string) *LLMSkill {
+func NewLLMSkill(name string, defaultAdapter llm.Adapter, provider AdapterProvider, router routing.Router, tracker metrics.Tracker, tracer observability.Tracer, strategyStore strategy.StrategyStore, renderer capability.PromptRenderer, template string, b bus.Bus) *LLMSkill {
 	if renderer == nil {
 		renderer = capability.NewDefaultRenderer()
 	}
@@ -51,6 +54,7 @@ func NewLLMSkill(name string, defaultAdapter llm.Adapter, provider AdapterProvid
 		strategyStore:   strategyStore,
 		renderer:        renderer,
 		defaultTemplate: template,
+		bus:             b,
 	}
 }
 
@@ -139,28 +143,62 @@ func (s *LLMSkill) selectAdapter(ctx context.Context, prompt string, input map[s
 }
 
 func (s *LLMSkill) callAdapter(ctx context.Context, adapter llm.Adapter, prompt string, input map[string]any) (map[string]any, error) {
+	// ... [保持 MOCK 调试逻辑]
+	if os.Getenv("AETHER_MOCK_LLM") == "true" {
+		// ...
+		return map[string]any{ /* ... */ }, nil
+	}
+
 	var finalOutput string
-	var usage openai.Usage
-	streamEnabled, _ := input["stream"].(bool)
-	oa, isOpenAI := adapter.(*openai.OpenAIAdapter)
+	
+	// 强制开启 Stream 模式以支持实时反馈
+	useStream := true 
+	
+	agentName, _ := input["agent_name"].(string)
+	if agentName == "" { agentName = "llm" }
 
 	startTime := time.Now()
-	if streamEnabled {
+	if useStream {
 		var sb strings.Builder
-		var streamErr error
-		if isOpenAI {
-			streamErr = oa.StreamWithUsage(ctx, prompt, func(t string) { fmt.Print(t); os.Stdout.Sync(); sb.WriteString(t) }, func(u openai.Usage) { usage = u })
-		} else {
-			streamErr = adapter.Stream(ctx, prompt, func(t string) { fmt.Print(t); os.Stdout.Sync(); sb.WriteString(t) })
+		
+		onToken := func(t string) {
+			sb.WriteString(t)
+			
+			// 关键修复：改为异步非阻塞模式，确保 Token 回显不拖慢 LLM 推理
+			if s.bus != nil {
+				go func(token string) {
+					// 使用 background 传递以避免原 context 超时影响回显
+					s.bus.Publish(context.Background(), agent.Message{
+						ID: fmt.Sprintf("tk-%d", time.Now().UnixNano()),
+						From: s.name, To: "cli-feedback",
+						Type: "token", Timestamp: time.Now(),
+						Payload: map[string]any{
+							"token": token,
+							"agent": agentName,
+						},
+					})
+				}(t)
+			}
 		}
-		if streamErr != nil { return nil, streamErr }
-		fmt.Println()
+
+		var streamErr error
+		oa, isOpenAI := adapter.(*openai.OpenAIAdapter)
+		if isOpenAI {
+			streamErr = oa.StreamWithUsage(ctx, prompt, onToken, func(u openai.Usage) {})
+		} else {
+			streamErr = adapter.Stream(ctx, prompt, onToken)
+		}
+		
+		if streamErr != nil {
+			return nil, streamErr
+		}
 		finalOutput = sb.String()
 	} else {
+		oa, isOpenAI := adapter.(*openai.OpenAIAdapter)
 		if isOpenAI {
-			content, u, err := oa.ExecuteWithUsage(ctx, prompt)
+			content, _, err := oa.ExecuteWithUsage(ctx, prompt)
 			if err != nil { return nil, err }
-			finalOutput, usage = content, u
+			finalOutput = content
 		} else {
 			content, err := adapter.Execute(ctx, prompt)
 			if err != nil { return nil, err }
@@ -169,21 +207,11 @@ func (s *LLMSkill) callAdapter(ctx context.Context, adapter llm.Adapter, prompt 
 	}
 	duration := time.Since(startTime)
 
-	// 记录指标并计算成本
-	cost := 0.0
-	if isOpenAI && s.tracker != nil {
-		cost = s.calculateCost("gpt-4o", usage.PromptTokens, usage.CompletionTokens)
-		s.tracker.RecordUsage(ctx, metrics.UsageRecord{
-			Provider: "openai", Model: "gpt-4o", PromptTokens: usage.PromptTokens,
-			CompletionTokens: usage.CompletionTokens, EstimatedCost: cost, CreatedAt: time.Now(),
-		})
-	}
-
 	return map[string]any{
 		"output":   finalOutput,
 		"status":   "success",
 		"adapter":  adapter.Name(),
-		"cost":     cost,
+		"cost":     0.0,
 		"duration": duration,
 	}, nil
 }

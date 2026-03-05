@@ -39,8 +39,7 @@ func (a *CoderAgent) Handle(ctx context.Context, msg Message) ([]Message, error)
 			})
 			defer span.End()
 
-			if msg.Type != "instruction" { return nil, nil }
-
+		if msg.Type == "instruction" {
 			plan := msg.Payload["plan"].(string)
 			task := msg.Payload["task"].(string)
 
@@ -64,13 +63,40 @@ func (a *CoderAgent) Handle(ctx context.Context, msg Message) ([]Message, error)
 			})
 			resSpan.End()
 
-			return []Message{{
-				From:      a.name,
-				To:        "reviewer",
-				Type:      "review_request",
-				Timestamp: time.Now(),
-				Payload:   map[string]any{"code": code, "task": task},
-			}}, nil
+			return []Message{
+				{
+					From:      a.name,
+					To:        "reviewer",
+					Type:      "review_request",
+					Timestamp: time.Now(),
+					Payload:   map[string]any{"code": code, "task": task},
+				},
+				{
+					From:      a.name,
+					To:        "supervisor",
+					Type:      "work_progress",
+					Timestamp: time.Now(),
+					Payload:   map[string]any{"status": "completed_coding", "code": code},
+				},
+			}, nil
+		}
+
+		// 处理来自 Reviewer 的反馈
+		if msg.Type == "review_result" {
+			approved, _ := msg.Payload["approved"].(bool)
+			if approved {
+				// 如果审核通过，Coder 负责发布最终报告给 CLI
+				return []Message{{
+					From:      a.name,
+					To:        "cli",
+					Type:      "final_report",
+					Timestamp: time.Now(),
+					Payload:   map[string]any{"result": msg.Payload["code"]},
+				}}, nil
+			}
+		}
+
+		return nil, nil
 		}
 		return nil, nil
 	})

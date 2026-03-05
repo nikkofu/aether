@@ -219,7 +219,7 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 
 	r.strategyEngine = evolution.NewDefaultStrategyEngine(llmSkill, r.knowledgeGraph, r.logger, r.evolutionGuard)
 	r.reflector = reflection.NewLLMReflector(llmSkill)
-	r.strategicPlanner = strategic.NewLLMStrategicPlanner(llmSkill, r.knowledgeGraph, r.strategyEngine)
+	r.strategicPlanner = strategic.NewLLMStrategicPlanner(llmSkill, r.knowledgeGraph, r.strategyEngine, r.logger)
 
 	skillEngine, _ := skill_registry.NewSQLiteSkillEngine(r.db, r.wasmExecutor, "./data/wasm_cache")
 	r.compiler = engine.NewPolyglotCompiler(skillEngine, "llm", r.logger, "./data/wasm_cache")
@@ -234,27 +234,6 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 	r.agentManager = dm
 	r.strategicEngine = strategic.NewEngine(r.strategicPlanner, r.strategicStore, r.agentManager, r.bus, r.logger, r.traceEngine)
 
-	r.initSystemAgents()
-	r.initOrgAgents()
-
-	if r.sysScheduler != nil { go r.sysScheduler.Start(context.Background()) }
-
-	// 如果是集群模式，启动心跳和相关的总线订阅
-	if cfg.App.Mode == "cluster-worker" {
-		cluster.StartWorkerHeartbeat(context.Background(), r.bus, cfg.App.Role, cfg.App.NodeID, r.logger)
-
-		// 订阅针对该节点的系统任务
-		r.bus.SubscribeToSubject(context.Background(), cfg.App.NodeID, func(msg agent.Message) {
-			if msg.Type == "system.spawn" {
-				role, _ := msg.Payload["role"].(string)
-				payload, _ := msg.Payload["payload"].(map[string]any)
-				if role != "" {
-					r.agentManager.Spawn(context.Background(), role, payload)
-				}
-			}
-		})
-	}
-
 	return r
 }
 
@@ -263,6 +242,22 @@ func (r *Runtime) initSystemAgents() {
 	supervisor.SetGraph(r.knowledgeGraph)
 	r.agentManager.Register(supervisor)
 	r.bus.Subscribe(supervisor)
+
+	// 预注册核心协作团队
+	llm, _ := r.registry.Get("llm")
+	
+	planner := agent.NewPlannerAgent("planner", llm, r.tracer)
+	planner.SetGraph(r.knowledgeGraph)
+	r.agentManager.Register(planner)
+	r.bus.Subscribe(planner)
+
+	coder := agent.NewCoderAgent("coder", llm, r.tracer)
+	r.agentManager.Register(coder)
+	r.bus.Subscribe(coder)
+
+	reviewer := agent.NewReviewerAgent("reviewer", llm, r.tracer)
+	r.agentManager.Register(reviewer)
+	r.bus.Subscribe(reviewer)
 
 	sentinel := agent.NewSentinelAgent("sentinel", agent.SentinelConfig{MaxDurationThreshold: 30 * time.Second, CostBudget: 1.0}, r.logger)
 	r.agentManager.Register(sentinel)
@@ -320,7 +315,38 @@ func (r *Runtime) RegisterAdapter(a llm.Adapter) {
 	r.router.UpdateAdapters(names)
 }
 
-func (r *Runtime) StartAgents(ctx context.Context)          { r.bus.Start(ctx) }
+func (r *Runtime) StartAgents(ctx context.Context) {
+	fmt.Fprintln(os.Stderr, "⚙️  正在唤醒智能体集群...")
+	
+	// 1. 系统角色同步注册 (订阅总线)
+	r.initSystemAgents()
+	r.initOrgAgents()
+
+	if r.sysScheduler != nil {
+		go r.sysScheduler.Start(ctx)
+	}
+
+	// 2. 如果是集群模式，启动心跳和相关的总线订阅
+	if r.cfg.App.Mode == "cluster-worker" {
+		cluster.StartWorkerHeartbeat(ctx, r.bus, r.cfg.App.Role, r.cfg.App.NodeID, r.logger)
+
+		// 订阅针对该节点的系统任务
+		r.bus.SubscribeToSubject(ctx, r.cfg.App.NodeID, func(msg agent.Message) {
+			if msg.Type == "system.spawn" {
+				role, _ := msg.Payload["role"].(string)
+				payload, _ := msg.Payload["payload"].(map[string]any)
+				if role != "" {
+					r.agentManager.Spawn(ctx, role, payload)
+				}
+			}
+		})
+	}
+
+	// 3. 异步启动总线消费循环 (防止阻塞主线程)
+	go r.bus.Start(ctx)
+	
+	fmt.Fprintln(os.Stderr, "🚀 集群已完全就绪，开始处理任务。")
+}
 func (r *Runtime) GetBus() bus.Bus                          { return r.bus }
 func (r *Runtime) AgentManager() agent.AgentManager         { return r.agentManager }
 func (r *Runtime) Logger() logging.Logger                   { return r.logger }
@@ -330,8 +356,7 @@ func (r *Runtime) Execute(ctx context.Context, adapter, prompt string) (string, 
 	return a.Execute(ctx, prompt)
 }
 func (r *Runtime) NewPipelineExecutor(workers int) *dag.PipelineExecutor {
-	_ = cluster.NewScheduler(r.logger, r.ledger, r.riskGuard)
-	return dag.NewPipelineExecutor(r.registry, r.policy, r.memory, r.tracer, workers)
+	return dag.NewPipelineExecutor(r.registry, r.policy, r.memory, r.tracer, r.logger, workers)
 }
 func (r *Runtime) GetRegistry() *capability.CapabilityRegistry { return r.registry }
 func (r *Runtime) Close() error {
@@ -396,15 +421,16 @@ func (r *Runtime) initLLM(cfg *config.Config) capability.Capability {
 	}
 
 	if defaultAdapter == nil {
-		// 如果没有任何配置，尝试使用默认本地 ollama
+		// 终极修复：如果没有任何配置，默认使用你本地存在的 qwen3.5:0.8b
 		defaultAdapter = ollama.NewOllamaAdapter(ollama.Config{
-			BaseURL: "http://localhost:11434", Model: "qwen2.5:0.5b",
+			BaseURL: "http://localhost:11434", Model: "qwen3.5:0.8b",
 			Temperature: 0.7, Timeout: 300 * time.Second,
 		})
 		r.RegisterAdapter(defaultAdapter)
 	}
 
-	llmSkill := skills.NewLLMSkill("llm", defaultAdapter, r, r.router, r.tracker, r.tracer, r.strategyStore, nil, "{{.prompt}}")
+	// 统一注册为系统的核心能力
+	llmSkill := skills.NewLLMSkill("llm", defaultAdapter, r, r.router, r.tracker, r.tracer, r.strategyStore, nil, "{{.prompt}}", r.bus)
 	r.registry.Register(llmSkill)
 	return llmSkill
 }

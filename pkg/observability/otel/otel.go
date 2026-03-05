@@ -27,10 +27,12 @@ func InitTracer(serviceName string) (func(context.Context) error, error) {
 		endpoint = "localhost:4317"
 	}
 
-	// 2. 配置 OTLP gRPC 导出器
+	// 2. 配置 OTLP gRPC 导出器 (增加重试和超时控制)
 	client := otlptracegrpc.NewClient(
 		otlptracegrpc.WithEndpoint(endpoint),
-		otlptracegrpc.WithInsecure(), // 生产环境通常使用 TLS，此处根据常规内网部署默认为非加密
+		otlptracegrpc.WithInsecure(),
+		otlptracegrpc.WithReconnectionPeriod(2*time.Second),
+		otlptracegrpc.WithTimeout(500*time.Millisecond), // 强制极短超时
 	)
 
 	exporter, err := otlptrace.New(ctx, client)

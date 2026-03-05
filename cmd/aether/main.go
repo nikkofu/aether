@@ -16,6 +16,8 @@ import (
 	"github.com/nikkofu/aether/pkg/config"
 	"github.com/nikkofu/aether/pkg/observability/otel"
 	"github.com/nikkofu/aether/internal/app"
+	go_otel "go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func main() {
@@ -76,7 +78,9 @@ func handleSingle(ctx context.Context, rt *app.Runtime, args []string) {
 	case "export":
 		handleExport(ctx, rt, args[1:])
 	case "run":
-		handleRun(rt, args[1:])
+		handleTask(ctx, rt, args[1:])
+	case "task":
+		handleTask(ctx, rt, args[1:])
 	case "skill":
 		cli.NewSkillHandler(rt).Handle(ctx, args[1:])
 	case "pipeline":
@@ -172,42 +176,75 @@ func printJSON(data any) {
 	fmt.Println(string(b))
 }
 
-func handleRun(rt *app.Runtime, args []string) {
+func handleTask(ctx context.Context, rt *app.Runtime, args []string) {
 	if len(args) < 1 {
-		fmt.Println("用法: aether run <task_description>")
+		fmt.Println("用法: aether task <task_description>")
 		return
 	}
 	taskDesc := args[0]
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	// 1. Tracing: 开启根 Span，将 CLI 任务作为 Trace 起点
+	tracer := go_otel.Tracer("aether-cli")
+	ctx, span := tracer.Start(ctx, "cli.task_execution")
+	span.SetAttributes(
+		attribute.String("task.description", taskDesc),
+		attribute.String("cli.mode", "one-shot"),
+	)
+	defer span.End()
 
-	fmt.Printf("🚀 启动 Agentic 协作任务: %s\n", taskDesc)
+	traceID := span.SpanContext().TraceID().String()
+	fmt.Printf("\n🚀 启动 Aether 协作任务 (TraceID: %s)\n", traceID)
+	fmt.Printf("🔗 Jaeger 监控: http://localhost:16686/trace/%s\n", traceID)
 	fmt.Println("--------------------------------------------------------------------------------")
 
-	// 1. 初始化并启动系统级代理
-	rt.StartAgents(ctx)
-	
-	// 给异步订阅一点启动时间
-	time.Sleep(200 * time.Millisecond)
+	// 2. 核心：在启动任何 Agent 之前，先完成全局订阅 (关键修复：解决 MemoryBus 订阅落后于发布的问题)
+	doneChan := make(chan string, 1)
+	rt.GetBus().SubscribeToSubject(ctx, "cli-feedback", func(msg agent.Message) {
+		switch msg.Type {
+		case "token":
+			if token, ok := msg.Payload["token"].(string); ok {
+				fmt.Fprintf(os.Stderr, "%s", token)
+			}
+		case "final_report":
+			result, _ := msg.Payload["result"].(string)
+			doneChan <- result
+		case "system.healing":
+			fmt.Printf("\n🛠️  [自愈系统] %v\n", msg.Payload["message"])
+		}
+	})
 
-	// 2. 向总线发布任务指令
+	// 3. 异步唤醒集群
+	go rt.StartAgents(ctx)
+	
+	// 企业级稳定性修复：增加预热延时，确保订阅链路全线畅通
+	fmt.Print("⚙️  系统正在冷启动模型与订阅总线...")
+	time.Sleep(1 * time.Second)
+	fmt.Println(" [OK]")
+
+	// 4. 下发任务
+	taskID := fmt.Sprintf("t-%d", time.Now().Unix())
+	fmt.Fprintf(os.Stderr, "📡 任务下发 (ID: %s)，正在请求 LLM 推理...\n", taskID)
+	fmt.Println("🧠 Thinking...") // 给用户实时反馈，证明系统活着
+	
 	rt.GetBus().Publish(ctx, agent.Message{
-		ID:        "task-" + time.Now().Format("150405"),
-		From:      "cli",
-		To:        "supervisor",
-		Type:      "task",
-		Timestamp: time.Now(),
+		ID: taskID, From: "cli", To: "supervisor",
+		Type: "task", Timestamp: time.Now(),
 		Payload: map[string]any{
-			"description": taskDesc,
+			"description": taskDesc, 
+			"org_id": "default",
+			"trace_id": traceID,
 		},
 	})
 
-	// 3. 阻塞直到任务完成或手动退出
-	// 这里的简化逻辑是等待上下文结束，实际场景中可以通过监听 final_report 结束
-	<-ctx.Done()
-	fmt.Println("\n--------------------------------------------------------------------------------")
-	fmt.Println("✅ 任务流执行完毕")
+	// 5. 等待执行结果
+	select {
+	case result := <-doneChan:
+		fmt.Printf("\n--------------------------------------------------------------------------------")
+		fmt.Printf("\n✨ 任务执行成功!\n\n--- 最终交付物 ---\n%s\n------------------\n", result)
+		fmt.Println("\n✅ Aether 流程全闭环执行完毕")
+	case <-ctx.Done():
+		fmt.Println("\n🛑 用户手动中断或执行超时")
+	}
 }
 
 func startLeader(ctx context.Context, rt *app.Runtime, task string) {

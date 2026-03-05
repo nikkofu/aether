@@ -14,6 +14,8 @@ type Bus interface {
 	Subscribe(a agent.Agent)
 	// SubscribeToSubject 订阅特定主题的消息并由回调函数处理
 	SubscribeToSubject(ctx context.Context, subject string, handler func(msg agent.Message))
+	// WaitReady 等待直到总线和所有核心订阅者就绪
+	WaitReady(ctx context.Context) error
 	// Start 启动后台处理循环
 	Start(ctx context.Context)
 }

@@ -1,20 +1,27 @@
 app:
+  name: "aether-enterprise"
   mode: "single"
-  node_id: "local-debug-node"
+  role: "supervisor"
+
+log:
+  level: "info"
+
+runtime:
+  nats_url: ""
+  database_path: "./aether.db"
 
 agent:
   max_spawn_per_task: 10
   max_concurrency: 50
 
-runtime:
-  database_path: "./aether.db"
-  # nats_url: "" # 彻底禁用 NATS 以确保本地极速响应
-
 ollama:
   base_url: "http://localhost:11434"
-  model: "qwen3.5:0.8b"
+  model: "qwen3.5:0.8b" # 精准匹配本地模型
   temperature: 0.7
-  timeout: 300s
+  timeout: "600s"
 
-log:
-  level: "debug"
+openai:
+  base_url: "https://api.openai.com/v1"
+  model: "gpt-4o"
+  temperature: 0.7
+  timeout: "120s"

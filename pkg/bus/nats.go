@@ -111,8 +111,8 @@ func (b *NATSBus) Subscribe(a agent.Agent) {
 			ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier(msg.Header))
 		}
 
-		// 故障恢复：Context 超时传播 (120s 分布式执行上限)
-		ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+		// 故障恢复：Context 超时传播 (15分钟分布式执行上限)
+		ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 		defer cancel()
 
 		responses, err := a.Handle(ctx, msg)
@@ -137,6 +137,14 @@ func (b *NATSBus) Subscribe(a agent.Agent) {
 
 	sub, _ := b.conn.Subscribe(subject, handler)
 	b.subs = append(b.subs, sub)
+}
+
+func (b *NATSBus) WaitReady(ctx context.Context) error {
+	if b.conn == nil || !b.conn.IsConnected() {
+		return fmt.Errorf("NATS 未连接")
+	}
+	// 简单的 ping 检查
+	return b.conn.FlushWithContext(ctx)
 }
 
 func (b *NATSBus) Start(ctx context.Context) {

@@ -11,6 +11,7 @@ import (
 	"github.com/nikkofu/aether/internal/domain/capability"
 	"github.com/nikkofu/aether/internal/domain/knowledge"
 	"github.com/nikkofu/aether/internal/domain/strategy/evolution"
+	"github.com/nikkofu/aether/pkg/logging"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
@@ -21,10 +22,11 @@ type LLMStrategicPlanner struct {
 	llm            capability.Capability
 	graph          knowledge.Graph
 	strategyEngine evolution.StrategyEngine // 注入策略进化引擎
+	logger         logging.Logger
 }
 
-func NewLLMStrategicPlanner(llm capability.Capability, g knowledge.Graph, se evolution.StrategyEngine) *LLMStrategicPlanner {
-	return &LLMStrategicPlanner{llm: llm, graph: g, strategyEngine: se}
+func NewLLMStrategicPlanner(llm capability.Capability, g knowledge.Graph, se evolution.StrategyEngine, log logging.Logger) *LLMStrategicPlanner {
+	return &LLMStrategicPlanner{llm: llm, graph: g, strategyEngine: se, logger: log}
 }
 
 func (p *LLMStrategicPlanner) CreateVision(ctx context.Context, title, desc string) (*Vision, error) {
@@ -110,10 +112,27 @@ func (p *LLMStrategicPlanner) PlanMilestones(ctx context.Context, g Goal) ([]Mil
 	prompt = strings.ReplaceAll(prompt, "{{goal_title}}", g.Title)
 
 	content, err := p.callLLM(ctx, prompt)
-	if err != nil { return nil, err }
+	if err != nil { 
+		span.RecordError(err)
+		return nil, err 
+	}
+
+	// 记录 LLM 响应到 Span，方便调试
+	span.SetAttributes(attribute.String("llm.response", content))
 
 	var raw []struct { Title string `json:"title"` }
-	json.Unmarshal([]byte(content), &raw)
+	if err := json.Unmarshal([]byte(content), &raw); err != nil {
+		span.RecordError(err)
+		// 关键修复：如果解析失败，记录原始响应以便排障
+		if p.logger != nil {
+			p.logger.Error(ctx, "LLM 响应 JSON 解析失败", 
+				logging.Err(err), 
+				logging.String("raw_content", content),
+				logging.String("goal_id", g.ID),
+			)
+		}
+		return nil, fmt.Errorf("failed to parse milestones JSON: %w", err)
+	}
 
 	milestones := make([]Milestone, 0, len(raw))
 	for _, rm := range raw {

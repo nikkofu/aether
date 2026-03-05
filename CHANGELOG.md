@@ -5,131 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.7.0-alpha] - 2026-03-02
+## [1.8.0-rc1] - 2026-03-05
 
 ### Added
-- **Ollama as Default Provider**:
-  - Set Ollama as the primary LLM provider for all core tasks.
-  - Default model updated to `qwen3.5:0.8b` for improved performance in low-resource environments.
-- **Refactored LLM Bootstrapping**:
-  - Modularized `initLLM` in `Runtime` to allow cleaner prioritization of local over cloud models.
-
-### Removed
-- **Gemini CLI Adapter**:
-  - Removed direct `gemini-cli` binary calls to focus on stable API-based/Local integrations.
+- **Enterprise-Grade Observability (Jaeger/OTel Integration)**:
+  - Full OpenTelemetry (OTel) instrumentation for all Agent and Skill executions.
+  - Automatic Trace-Log correlation: Every `Zap` log now includes the current `trace_id` and `span_id`.
+  - Rich Span Attributes: Captured full input/output snapshots (JSON) in Jaeger for all LLM and DAG nodes.
+- **Real-time Stream Feedback (Typewriter Effect)**:
+  - Implemented a unified asynchronous token broadcast system via `Bus`.
+  - `Aether CLI` now supports real-time, zero-latency streaming feedback from Ollama/OpenAI.
+- **Agentic Self-Healing & Robustness**:
+  - Refactored `OllamaAdapter` to use `json.Decoder` for non-blocking stream parsing, resolving `Scanner` hang issues.
+  - Implemented `ProtectedHandle` in `BaseAgent` with panic recovery and fault-injection tracing.
+  - Added "First Byte" pre-warming logic to CLI task execution for high-reliability startup.
+- **Command-Line Parametrization**:
+  - Introduced `aether task "<description>"` for one-shot, autonomous goal execution without YAML.
+  - Supported `--input '{"key": "val"}'` for dynamic pipeline variable injection.
 
 ### Changed
-- **Config Defaults**: Updated `config.example.yaml` to showcase Ollama-first setup.
-
-## [1.6.0-alpha] - 2026-03-02
-
-### Added
-- **Web UI 2.0 (Real-time Telemetry Dashboard)**:
-  - Completely revamped the React frontend with a modern, cyberpunk-inspired Tailwind CSS v4 design.
-  - Implemented an SSE (Server-Sent Events) API endpoint (`/stream`) in `aetherd` that broadcasts all `Bus` events.
-  - The UI now visualizes real-time cluster activities including agent bidding, task assignment, and critical system alerts.
-
-## [1.5.0-alpha] - 2026-03-02
-
-### Added
-- **Polyglot Skill Compiler**:
-  - Implemented `engine.PolyglotCompiler` to auto-translate scripts (e.g., Python) into WASI-compliant Go code via LLM.
-  - Automatically invokes system toolchains to compile the generated code into sandboxed `.wasm` binaries.
-  - Added new CLI command: `aether skill compile --lang python <file>`.
-
-## [1.4.0-alpha] - 2026-03-02
-
-### Added
-- **Competitive Bidding Economy (Task Auction)**:
-  - Implemented a decentralized task allocation protocol (`task_tender`, `bid_submission`).
-  - `Scheduler` now supports Auction-based selection, evaluating agents based on a weighted score of bid price (40%) and reputation (60%).
-  - `BaseAgent` automatically participates in relevant tenders when idle, using a simple game-theory pricing strategy.
-  - Significantly improves load balancing and cost-efficiency in large-scale multi-agent deployments.
-
-## [1.3.0-alpha] - 2026-03-02
-
-### Added
-- **Long-term Engineering Memory (Lite RAG)**:
-  - Implemented `Search` interface in `KnowledgeGraph` for semantic-ish experience retrieval.
-  - `PlannerAgent` now automatically queries past task `Reflections` to avoid repeating historical mistakes.
-  - `SupervisorAgent` automatically persists "Lessons Learned" into the graph after every task completion.
-  - Closed the "Execution -> Reflection -> Learning -> Guidance" autonomous loop.
-
-## [1.2.0-alpha] - 2026-03-02
-
-### Added
-- **Event-Driven Auto-Healing Daemon (`aetherd`)**:
-  - Introduced a standalone background daemon process for Aether.
-  - Implemented GitHub Webhook listener (`/webhooks/github`) to capture `issues` events.
-  - Automatically translates external bug reports into actionable DAG task payloads (`system.spawn`) without human intervention, transforming Aether into an always-on AI team.
-
-## [1.1.0-alpha] - 2026-03-02
-
-### Added
-- **Local LLM Support (Ollama)**:
-  - Added native adapter for Ollama, enabling zero-cost, fully private offline agent execution.
-  - Introduced new configuration block `[ollama]` with customizable `base_url`, `model`, and `temperature`.
-  - Automatically falls back to local models when configured alongside OpenAI/Gemini.
-- **DAG Visualization**:
-  - Implemented `ToMermaid()` method for `Pipeline`.
-  - Automatically exports task dependencies and nodes into standard Mermaid.js `graph TD` format for enhanced observability and debugging.
-
-## [1.0.0-rc1] - 2026-03-02
-
-### Added
-- **Dynamic WASM Skill Loading**:
-  - `SQLiteSkillEngine` now supports fetching WASM code from remote URLs.
-  - Automated caching and atomic updates for WASM binary management.
-  - Integrated `WASMExecutor` for secure, sandboxed skill execution.
-- **DAO-like Governance**:
-  - Enhanced `GovernanceBoard` with automated policy execution.
-  - Proposals can now dynamically update the `Policy Engine` rules upon passing.
-  - Added `UpdateRule` to `Policy` interface for real-time regulation.
-- **Project Structure**:
-  - Fully migrated to a **Top-tier Enterprise Layout** (Clean Architecture).
-  - Categorized code into `domain`, `usecase`, `infrastructure`, `app`, and `pkg`.
-
-### Changed
-- Moved core entities (`Skill`, `SkillVersion`, `SkillEngine`) to `internal/domain/capability/skills` for architectural integrity.
-- Refactored all internal packages to resolve circular dependencies and improve maintainability.
+- **Config Schema Unified**: Refactored `Config` struct and `config.yaml` to remove deep nesting and hardcoded model fallbacks.
+- **Bootstrap Logic**: `Runtime` now enforces strict model selection, eliminating silent 404 failures.
 
 ### Fixed
-- Fixed nil pointer dereference in `LLMSkill` when `strategyStore` is not provided.
-- Fixed incorrect interface and type references across `usecase` layers.
+- Fixed nil pointer dereferences in `PlannerAgent` when `Tracer` or `Manager` was partially initialized.
+- Resolved distributed race condition in `MemoryBus` where subscriptions could lag behind publications.
 
-## [0.2.0-alpha] - 2026-03-02
-
-### Added
-- **Distributed Scheduling (NATS based)**:
-  - Enhanced `Bus` interface with `SubscribeToSubject` for flexible message routing.
-  - Implemented `NATSBus` support for cluster-wide communication.
-  - Enhanced `Scheduler` with heartbeat-based worker registration and selection.
-  - Updated `AgentManager` to support distributed task dispatching via NATS.
-  - Support for `cluster-leader` and `cluster-worker` modes in `Runtime`.
-  - Heartbeat mechanism for node health monitoring.
-
-### Changed
-- Refactored `NewDefaultRuntime` to handle cluster configuration.
-- Improved `MemoryBus` to support subject-based subscriptions.
-
-### Fixed
-- Fixed various syntax errors in `internal/app/runtime.go`.
-- Fixed unused import in `pkg/observability/metrics/calculator.go`.
-
-## [0.1.0-alpha] - 2026-03-02
-
-### Added
-- **Core Architecture**: Initial multi-agent skeleton with `Manager`, `Planner`, `Coder`, `Reviewer`, and `Supervisor`.
-- **Capabilities**: Native support for Email, File, Calendar, Alarm, Search, and Registry.
-- **Observability**: Integrated Tracing and Metrics system with SQLite storage and Grafana-ready APIs.
-- **Bus**: Event-driven communication supporting both in-memory and NATS.
-- **Web UI**: Modern React-based dashboard for managing agents and monitoring metrics.
-- **Governance**: Basic policy engine and evolution guard mechanisms.
-- **DAG Runtime**: Foundation for task dependency management and execution.
-
----
-
-[1.1.0-alpha]: https://github.com/nikkofu/aether/releases/tag/v1.1.0-alpha
-[1.0.0-rc1]: https://github.com/nikkofu/aether/releases/tag/v1.0.0-rc1
-[0.2.0-alpha]: https://github.com/nikkofu/aether/releases/tag/v0.2.0-alpha
-[0.1.0-alpha]: https://github.com/nikkofu/aether/releases/tag/v0.1.0-alpha
+... (rest of the file)

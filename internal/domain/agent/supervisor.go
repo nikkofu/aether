@@ -65,6 +65,14 @@ func (a *SupervisorAgent) Handle(ctx context.Context, msg Message) ([]Message, e
 
 		case "agent.reflection":
 			return a.handleReflection(ctx, msg)
+
+		case "work_progress":
+			// 汇总进度
+			status, _ := msg.Payload["status"].(string)
+			if a.logger != nil {
+				a.logger.Info(ctx, "收到工作进度上报", logging.String("agent", msg.From), logging.String("progress", status))
+			}
+			return nil, nil
 		}
 
 		return nil, nil

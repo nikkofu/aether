@@ -1,7 +1,6 @@
 package ollama
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -21,7 +20,12 @@ type Adapter struct {
 func NewOllamaAdapter(cfg Config) *Adapter {
 	return &Adapter{
 		config: cfg,
-		client: &http.Client{Timeout: cfg.Timeout},
+		// 关键修复：不再设置全局 Timeout，否则流式传输会因为 Body 读取时间长而被 client 强制杀掉
+		client: &http.Client{
+			Transport: &http.Transport{
+				ResponseHeaderTimeout: cfg.Timeout, // 仅限制响应头超时
+			},
+		},
 	}
 }
 
@@ -74,49 +78,40 @@ func (a *Adapter) Stream(ctx context.Context, prompt string, onToken llm.TokenCa
 		"model":  a.config.Model,
 		"prompt": prompt,
 		"stream": true,
-		"options": map[string]any{
-			"temperature": a.config.Temperature,
-		},
+		"options": map[string]any{"temperature": a.config.Temperature},
 	}
 	
 	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/api/generate", a.config.BaseURL), bytes.NewBuffer(body))
-	if err != nil {
-		return err
-	}
+	if err != nil { return err }
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)
-	if err != nil {
-		return err
-	}
+	if err != nil { return err }
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("ollama API 错误: %s", resp.Status)
 	}
 
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
+	// 核心修复：改用 Decoder 逐个解析 JSON 对象，不再依赖换行符
+	decoder := json.NewDecoder(resp.Body)
+	for {
 		var chunk struct {
 			Response string `json:"response"`
 			Done     bool   `json:"done"`
 		}
-		if err := json.Unmarshal(line, &chunk); err == nil {
-			if chunk.Response != "" && onToken != nil {
-				onToken(chunk.Response)
-			}
-			if chunk.Done {
-				break
-			}
+		if err := decoder.Decode(&chunk); err != nil {
+			if err.Error() == "EOF" { break }
+			return err
 		}
-	}
 
-	return scanner.Err()
+		if chunk.Response != "" && onToken != nil {
+			onToken(chunk.Response)
+		}
+		if chunk.Done { break }
+	}
+	return nil
 }
 
 var _ llm.Adapter = (*Adapter)(nil)
