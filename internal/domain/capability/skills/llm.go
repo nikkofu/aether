@@ -164,13 +164,12 @@ func (s *LLMSkill) callAdapter(ctx context.Context, adapter llm.Adapter, prompt 
 		onToken := func(t string) {
 			sb.WriteString(t)
 			
-			// 关键修复：改为异步非阻塞模式，确保 Token 回显不拖慢 LLM 推理
+			// 关键修复：将 Token 发布到统一的 "cli" 主题，确保与 main.go 对齐
 			if s.bus != nil {
 				go func(token string) {
-					// 使用 background 传递以避免原 context 超时影响回显
 					s.bus.Publish(context.Background(), agent.Message{
 						ID: fmt.Sprintf("tk-%d", time.Now().UnixNano()),
-						From: s.name, To: "cli-feedback",
+						From: s.name, To: "cli",
 						Type: "token", Timestamp: time.Now(),
 						Payload: map[string]any{
 							"token": token,
