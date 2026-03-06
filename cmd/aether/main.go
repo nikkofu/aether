@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -183,13 +184,10 @@ func handleTask(ctx context.Context, rt *app.Runtime, args []string) {
 	}
 	taskDesc := args[0]
 
-	// 1. Tracing: 开启根 Span，将 CLI 任务作为 Trace 起点
+	// 1. Tracing: 开启根 Span
 	tracer := go_otel.Tracer("aether-cli")
 	ctx, span := tracer.Start(ctx, "cli.task_execution")
-	span.SetAttributes(
-		attribute.String("task.description", taskDesc),
-		attribute.String("cli.mode", "one-shot"),
-	)
+	span.SetAttributes(attribute.String("task.description", taskDesc))
 	defer span.End()
 
 	traceID := span.SpanContext().TraceID().String()
@@ -197,34 +195,44 @@ func handleTask(ctx context.Context, rt *app.Runtime, args []string) {
 	fmt.Printf("🔗 Jaeger 监控: http://localhost:16686/trace/%s\n", traceID)
 	fmt.Println("--------------------------------------------------------------------------------")
 
-	// 2. 核心：在启动任何 Agent 之前，先完成全局订阅 (关键修复：解决 MemoryBus 订阅落后于发布的问题)
+	// 2. 核心：在启动 Agent 前先订阅。统一反馈主题为 "cli"
 	doneChan := make(chan string, 1)
-	rt.GetBus().SubscribeToSubject(ctx, "cli-feedback", func(msg agent.Message) {
+	rt.GetBus().SubscribeToSubject(ctx, "cli", func(msg agent.Message) {
 		switch msg.Type {
 		case "token":
 			if token, ok := msg.Payload["token"].(string); ok {
-				fmt.Fprintf(os.Stderr, "%s", token)
+				agentName, _ := msg.Payload["agent"].(string)
+				color := "\033[37m" 
+				if strings.Contains(agentName, "planner") { color = "\033[32m" }
+				if strings.Contains(agentName, "supervisor") { color = "\033[35m" }
+				if strings.Contains(agentName, "coder") { color = "\033[34m" }
+				if strings.Contains(agentName, "reviewer") { color = "\033[33m" }
+
+				processedToken := token
+				if strings.Contains(token, "Thought:") { processedToken = "\033[1;33m" + token + "\033[0m" + color }
+				if strings.Contains(token, "Action:") { processedToken = "\033[1;32m" + token + "\033[0m" + color }
+				if strings.Contains(token, "Observation:") { processedToken = "\033[1;36m" + token + "\033[0m" + color }
+
+				fmt.Fprintf(os.Stderr, "%s%s\033[0m", color, processedToken)
 			}
 		case "final_report":
 			result, _ := msg.Payload["result"].(string)
 			doneChan <- result
 		case "system.healing":
-			fmt.Printf("\n🛠️  [自愈系统] %v\n", msg.Payload["message"])
+			fmt.Printf("\n\033[1;31m🛠️  [自愈系统] %v\033[0m\n", msg.Payload["message"])
 		}
 	})
 
-	// 3. 异步唤醒集群
+	// 3. 唤醒集群
 	go rt.StartAgents(ctx)
-	
-	// 企业级稳定性修复：增加预热延时，确保订阅链路全线畅通
 	fmt.Print("⚙️  系统正在冷启动模型与订阅总线...")
 	time.Sleep(1 * time.Second)
 	fmt.Println(" [OK]")
 
 	// 4. 下发任务
 	taskID := fmt.Sprintf("t-%d", time.Now().Unix())
-	fmt.Fprintf(os.Stderr, "📡 任务下发 (ID: %s)，正在请求 LLM 推理...\n", taskID)
-	fmt.Println("🧠 Thinking...") // 给用户实时反馈，证明系统活着
+	fmt.Fprintf(os.Stderr, "📡 任务下发 (ID: %s)...\n", taskID)
+	fmt.Println("🧠 Thinking...")
 	
 	rt.GetBus().Publish(ctx, agent.Message{
 		ID: taskID, From: "cli", To: "supervisor",
@@ -236,14 +244,17 @@ func handleTask(ctx context.Context, rt *app.Runtime, args []string) {
 		},
 	})
 
-	// 5. 等待执行结果
+	// 5. 阻塞等待直至完成或超时
 	select {
 	case result := <-doneChan:
 		fmt.Printf("\n--------------------------------------------------------------------------------")
 		fmt.Printf("\n✨ 任务执行成功!\n\n--- 最终交付物 ---\n%s\n------------------\n", result)
-		fmt.Println("\n✅ Aether 流程全闭环执行完毕")
+		fmt.Println("\n✅ Aether 流程已全线闭环。")
+		time.Sleep(500 * time.Millisecond) // 留时间给 OTel Flush
+		os.Exit(0) // 强制退出
 	case <-ctx.Done():
 		fmt.Println("\n🛑 用户手动中断或执行超时")
+		os.Exit(1)
 	}
 }
 

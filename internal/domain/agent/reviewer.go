@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/nikkofu/aether/internal/domain/capability"
@@ -31,52 +33,53 @@ func (a *ReviewerAgent) Handle(ctx context.Context, msg Message) ([]Message, err
 	}
 
 	return a.ProtectedHandle(ctx, msg, func() ([]Message, error) {
-		if a.tracer != nil {
-			var span observability.Span
-			ctx, span = a.tracer.StartSpan(ctx, "Reviewer.Handle", map[string]any{
-				"task": msg.Payload["task"],
-			})
-			defer span.End()
+		if msg.Type != "review_request" { return nil, nil }
 
-			if msg.Type != "review_request" { return nil, nil }
+		code, _ := msg.Payload["code"].(string)
+		task, _ := msg.Payload["task"].(string)
 
-			code := msg.Payload["code"].(string)
-			task := msg.Payload["task"].(string)
+		fmt.Fprintf(os.Stderr, "\n🧐 [%s] 正在进行深度质量评审...\n", strings.ToUpper(a.name))
 
-			prompt := fmt.Sprintf("作为高级架构师，请评审针对任务 '%s' 的代码，给出详细意见并判定是否通过：\n%s", task, code)
-			
-			// 记录 LLM 调用
-			llmCtx, llmSpan := a.tracer.StartSpan(ctx, "Reviewer.LLM_Inference", map[string]any{
-				"code_to_review": code,
-			})
-			output, err := a.llmSkill.Execute(llmCtx, map[string]any{"prompt": prompt, "agent_name": a.name})
-			if err != nil {
-				llmSpan.End()
-				return nil, err
-			}
-			review, _ := output["output"].(string)
-			llmSpan.End()
+		prompt := fmt.Sprintf(`作为资深架构师，请对以下代码进行 ReAct 模式评审：
+任务背景: %s
+待审代码:
+%s
 
-			// 记录评审结果
-			_, resSpan := a.tracer.StartSpan(ctx, "Reviewer.Result", map[string]any{
-				"review_feedback": review,
-			})
-			resSpan.End()
+请按以下格式输出：
+Thought: 分析代码的逻辑正确性、安全性和性能。
+Decision: [PASS] 或 [FAIL]
+Feedback: 详细的改进意见。
 
-			// 逻辑：向 Coder 反馈评审结果
-			return []Message{{
-				From:      a.name,
-				To:        msg.From, // 回复给 Coder
-				Type:      "review_result",
-				Timestamp: time.Now(),
-				Payload: map[string]any{
-					"approved": true, // 简化逻辑，暂定为 true
-					"feedback": review,
-					"code":     code,
-				},
-			}}, nil
+开始评审：`, task, code)
+		
+		output, err := a.llmSkill.Execute(ctx, map[string]any{
+			"prompt":     prompt, 
+			"agent_name": fmt.Sprintf("%s:reviewing", a.name),
+			"stream":     true,
+		})
+		if err != nil { return nil, err }
+
+		review, _ := output["output"].(string)
+		approved := !strings.Contains(strings.ToUpper(review), "DECISION: [FAIL]")
+
+		// 如果未通过，在终端给予醒目提示
+		if !approved {
+			fmt.Fprintf(os.Stderr, "\n\033[1;31m❌ 评审未通过，已打回重做！\033[0m\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "\n\033[1;32m✅ 评审通过！\033[0m\n")
 		}
-		return nil, nil
+
+		return []Message{{
+			From:      a.name,
+			To:        msg.From, // 回复给发送方
+			Type:      "review_result",
+			Timestamp: time.Now(),
+			Payload: map[string]any{
+				"approved": approved,
+				"feedback": review,
+				"code":     code,
+			},
+		}}, nil
 	})
 }
 

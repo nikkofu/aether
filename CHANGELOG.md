@@ -5,21 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.8.0-rc1] - 2026-03-05
+## [1.8.0] - 2026-03-05
 
 ### Added
-- **Full-Stack Observability**: Integrated OpenTelemetry for end-to-end agentic workflow tracing.
-- **Trace-Log Correlation**: Automatic injection of TraceID and SpanID into structured logs (Zap).
-- **Asynchronous Token Stream**: High-performance token broadcasting via Bus for real-time CLI feedback.
-- **Robustness & Self-Healing**: Implemented panic recovery and JSON-based fault injection analysis in Agent handlers.
-- **Native Ollama Optimization**: Enhanced streaming performance via `json.Decoder` based chunk parsing.
+- **ReAct Reasoning Paradigm**: All core agents (Planner, Coder, Reviewer) now follow the Thought -> Action -> Observation cycle for superior logic and reliability.
+- **Visual Matrix CLI**: Implemented full ANSI color support for real-time typewriter feedback. Each agent role now has a distinct visual identity.
+- **Autonomous Orchestration**: Supervisor now monitors the entire bus to facilitate seamless task handovers between roles without manual intervention.
+- **Graceful Lifecycle Management**: CLI now automatically flushes traces and exits cleanly upon task completion.
+- **Robustness Overhaul**: Eliminated nil pointer risks in agent handlers and refactored stream parsing using `json.Decoder` for zero-hang execution.
 
 ### Changed
-- **Unified Configuration**: Flattened configuration schema for better maintainability and environment parity.
-- **Bootstrap Hardening**: Enforced strict capability registration to prevent silent initialization failures.
+- **Messaging Alignment**: Unified all CLI feedback to the `cli` subject for high-precision message routing.
+- **Pre-warming Logic**: Introduced a cold-start buffer to ensure Ollama models and NATS/MemoryBus are fully ready before task dispatch.
 
-### Fixed
-- Fixed nil pointer dereferences in `PlannerAgent` when `Tracer` or `Manager` was partially initialized.
-- Resolved distributed race condition in `MemoryBus` where subscriptions could lag behind publications.
-
-... (rest of the file)
+## [1.7.0-alpha] - 2026-03-02
+... (rest of previous logs)

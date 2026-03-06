@@ -3,34 +3,22 @@ package agent
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime/debug"
 	"strings"
-	"sync"
-	"time"
 
-	"github.com/nikkofu/aether/internal/usecase/learning"
 	"github.com/nikkofu/aether/pkg/logging"
-	"github.com/nikkofu/aether/internal/usecase/reflection"
-	"go.opentelemetry.io/otel"
+	go_otel "go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 )
 
-// BaseAgent 提供了 Agent 接口的基础实现及自进化闭环。
+// BaseAgent 是所有具体代理实现的基类，提供了基础的状态管理和元数据支持。
 type BaseAgent struct {
-	mu       sync.RWMutex
 	name     string
 	role     string
 	status   Status
-	bus      Bus
 	metadata map[string]any
-
-	// 自进化组件
-	reflector      reflection.Reflector
-	reflectionStore reflection.Store
-	learningEngine *learning.LearningEngine
-	logger         logging.Logger
+	logger   logging.Logger
+	bus      Bus // 增加对 Bus 的支持以符合接口
 }
 
 func NewBaseAgent(name, role string) *BaseAgent {
@@ -42,159 +30,59 @@ func NewBaseAgent(name, role string) *BaseAgent {
 	}
 }
 
-// SetComponents 注入核心组件。
-func (b *BaseAgent) SetComponents(ref reflection.Reflector, res reflection.Store, le *learning.LearningEngine, l logging.Logger) {
-	b.reflector = ref
-	b.reflectionStore = res
-	b.learningEngine = le
-	b.logger = l
-}
-
 func (b *BaseAgent) Name() string { return b.name }
 func (b *BaseAgent) Role() string { return b.role }
 
-func (b *BaseAgent) Status() Status {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return b.status
-}
+func (b *BaseAgent) Status() Status { return b.status }
+func (b *BaseAgent) SetStatus(s Status) { b.status = s }
 
-func (b *BaseAgent) SetStatus(s Status) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.status = s
-}
-
-func (b *BaseAgent) SetBus(bus Bus) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.bus = bus
-}
+func (b *BaseAgent) SetLogger(l logging.Logger) { b.logger = l }
+func (b *BaseAgent) SetBus(bus Bus) { b.bus = bus }
 
 func (b *BaseAgent) Metadata() map[string]any {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
 	res := make(map[string]any)
 	for k, v := range b.metadata { res[k] = v }
 	return res
 }
 
-// ProtectedHandle 是一个包装器，增加了 Panic Recovery 和反思闭环。
+// ProtectedHandle 是一个包装器，增加了身份标识、Panic Recovery 和故障分析。
 func (b *BaseAgent) ProtectedHandle(ctx context.Context, msg Message, handler func() ([]Message, error)) (res []Message, err error) {
-	if os.Getenv("AETHER_LOG_LEVEL") == "debug" {
-		fmt.Fprintf(os.Stderr, "⚡ [%s] 正在处理消息: %s\n", strings.ToUpper(b.name), msg.Type)
-	}
+	// 注入身份标识到 Context
+	ctx = context.WithValue(ctx, "agent_name", b.name)
+	ctx = context.WithValue(ctx, "agent_role", b.role)
 
-	// Tracing: agent execution
-	tracer := otel.Tracer("aether-tracer")
-	ctx, span := tracer.Start(ctx, "agent.execute")
+	// Tracing: 使用 go_otel
+	tracer := go_otel.Tracer("aether-tracer")
+	ctx, span := tracer.Start(ctx, fmt.Sprintf("[%s:%s] Handle", strings.ToUpper(b.role), b.name))
 	span.SetAttributes(
-		attribute.String("agent.name", b.name),
+		attribute.String("agent.id", b.name),
 		attribute.String("agent.role", b.role),
-		attribute.String("msg.id", msg.ID),
 		attribute.String("msg.type", msg.Type),
 	)
 	defer span.End()
 
 	b.SetStatus(StatusRunning)
-	start := time.Now()
-
-	// 增加显式的 Context 超时保护 (10分钟)
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
 
 	// 1. Panic Recovery
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic in agent %s: %v", b.name, r)
 			if b.logger != nil {
-				b.logger.Error(ctx, "代理崩溃拦截", logging.Any("panic", r), logging.String("stack", string(debug.Stack())))
+				b.logger.Error(ctx, "Agent 发生崩溃", logging.Any("panic", r), logging.String("stack", string(debug.Stack())))
 			}
 			b.SetStatus(StatusFailed)
 			span.RecordError(err)
-			span.SetStatus(codes.Error, "panic occurred")
 		} else if err != nil {
 			b.SetStatus(StatusFailed)
 			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
 		} else {
 			b.SetStatus(StatusIdle)
-			span.SetStatus(codes.Ok, "success")
 		}
-
-		// 2. 执行结束后触发反思闭环
-		go b.reflectAndLearn(ctx, msg.ID, start, err)
 	}()
 
 	return handler()
 }
 
-func (b *BaseAgent) reflectAndLearn(ctx context.Context, taskID string, start time.Time, err error) {
-	if b.reflector == nil || b.learningEngine == nil { return }
-
-	// 为反思过程创建一个子 Span
-	tracer := otel.Tracer("aether-tracer")
-	reflCtx, span := tracer.Start(ctx, "agent.reflection_loop")
-	defer span.End()
-
-	input := reflection.ReflectionInput{
-		AgentName: b.name,
-		TaskID:    taskID,
-		Error:     err,
-		Duration:  time.Since(start),
-	}
-
-	// 执行反思
-	reflectResult, rErr := b.reflector.Reflect(reflCtx, input)
-	if rErr != nil { 
-		span.RecordError(rErr)
-		return 
-	}
-
-	// 注入元数据到 Span
-	span.SetAttributes(
-		attribute.Bool("reflection.success", reflectResult.Success),
-		attribute.String("reflection.analysis", reflectResult.Analysis),
-		attribute.StringSlice("reflection.suggestions", reflectResult.Suggestions),
-	)
-
-	// 保存反思
-	if b.reflectionStore != nil {
-		_ = b.reflectionStore.Save(reflCtx, reflectResult)
-	}
-
-	// 更新策略
-	_ = b.learningEngine.UpdateStrategy(reflectResult)
-}
-
-func (b *BaseAgent) HandleSystemMessage(ctx context.Context, msg Message) []Message {
-	if msg.Type == TypeTaskTender {
-		targetRole, _ := msg.Payload["role"].(string)
-		if targetRole != b.role { return nil }
-
-		// 如果当前代理正忙，不竞标
-		if b.Status() != StatusIdle { return nil }
-
-		taskID, _ := msg.Payload["task_id"].(string)
-		basePrice, _ := msg.Payload["base_price"].(float64)
-
-		// 竞标算法：基于基础价格随机浮动，模拟节点差异
-		// 实际上这里可以集成更复杂的逻辑，比如基于过去 10 次成功的平均耗时来报价
-		myPrice := basePrice * 0.9 // 默认打 9 折以增加竞争力
-
-		return []Message{{
-			From:      b.name,
-			To:        msg.From, // 发回给招标方 (Scheduler)
-			Type:      TypeBidSubmission,
-			Timestamp: time.Now(),
-			Payload: map[string]any{
-				"task_id": taskID,
-				"price":   myPrice,
-			},
-		}}
-	}
-	return nil
-}
-
+func (b *BaseAgent) HandleSystemMessage(ctx context.Context, msg Message) []Message { return nil }
 func (b *BaseAgent) Spawn(ctx context.Context, role string, payload map[string]any) (string, error) { return "", nil }
 func (b *BaseAgent) Shutdown(ctx context.Context) error { return nil }

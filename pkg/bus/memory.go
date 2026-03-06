@@ -111,7 +111,13 @@ func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 	}
 
 	for _, sub := range b.subscribers {
-		if msg.To != "" && msg.To != sub.Name() {
+		// 关键修复：支持广播与编排者监听
+		isOrchestrator := sub.Role() == "supervisor" || sub.Role() == "manager"
+		
+		// 编排者特权：监听非 UI 类消息（排除 token）
+		if isOrchestrator && msg.Type != "token" {
+			// 允许通过
+		} else if msg.To != "" && msg.To != sub.Name() {
 			continue
 		}
 

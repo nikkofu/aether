@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/nikkofu/aether/internal/domain/capability"
@@ -53,13 +54,20 @@ func (a *PlannerAgent) Handle(ctx context.Context, msg Message) ([]Message, erro
 			return nil, fmt.Errorf("task description is empty")
 		}
 
-		fmt.Fprintf(os.Stderr, "\n🧠 [%s] 正在生成执行计划...\n", a.name)
+		fmt.Fprintf(os.Stderr, "\n🧠 [%s] 正在启动 ReAct 推理循环...\n", strings.ToUpper(a.name))
 
-		// 3. 执行 LLM 推理
-		// 增加显式的流式提示，确保我们的 Stream 逻辑能被触发
+		// 3. 执行 LLM 推理 (ReAct 模式)
 		input := map[string]any{
-			"prompt":     fmt.Sprintf("请作为架构师，将以下任务拆解为具体的执行步骤：'%s'。请直接返回步骤列表。", description),
-			"agent_name": a.name,
+			"prompt": fmt.Sprintf(`你是一个资深的架构师智能体。请使用 ReAct 模式处理任务。
+任务内容: '%s'
+
+请严格按以下格式思考和输出：
+Thought: 深度分析任务目标、技术选型难点及模块依赖。
+Action: 将任务拆解为具体的执行指令（JSON 列表格式）。
+Observation: 定义每个模块的成功交付标准。
+
+开始推理：`, description),
+			"agent_name": fmt.Sprintf("%s:reasoning", a.name),
 			"stream":     true,
 		}
 

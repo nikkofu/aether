@@ -316,9 +316,9 @@ func (r *Runtime) RegisterAdapter(a llm.Adapter) {
 }
 
 func (r *Runtime) StartAgents(ctx context.Context) {
-	fmt.Fprintln(os.Stderr, "⚙️  正在唤醒智能体集群...")
+	fmt.Fprintf(os.Stderr, "\033[1;35m⚙️  正在唤醒智能体集群...\033[0m")
 	
-	// 1. 系统角色同步注册 (订阅总线)
+	// 1. 系统角色同步注册
 	r.initSystemAgents()
 	r.initOrgAgents()
 
@@ -326,26 +326,10 @@ func (r *Runtime) StartAgents(ctx context.Context) {
 		go r.sysScheduler.Start(ctx)
 	}
 
-	// 2. 如果是集群模式，启动心跳和相关的总线订阅
-	if r.cfg.App.Mode == "cluster-worker" {
-		cluster.StartWorkerHeartbeat(ctx, r.bus, r.cfg.App.Role, r.cfg.App.NodeID, r.logger)
-
-		// 订阅针对该节点的系统任务
-		r.bus.SubscribeToSubject(ctx, r.cfg.App.NodeID, func(msg agent.Message) {
-			if msg.Type == "system.spawn" {
-				role, _ := msg.Payload["role"].(string)
-				payload, _ := msg.Payload["payload"].(map[string]any)
-				if role != "" {
-					r.agentManager.Spawn(ctx, role, payload)
-				}
-			}
-		})
-	}
-
-	// 3. 异步启动总线消费循环 (防止阻塞主线程)
+	// 2. 异步启动总线消费循环
 	go r.bus.Start(ctx)
 	
-	fmt.Fprintln(os.Stderr, "🚀 集群已完全就绪，开始处理任务。")
+	fmt.Fprintf(os.Stderr, " \033[1;32m[OK]\033[0m\n\033[1;32m🚀 集群已完全就绪，开始处理任务。\033[0m\n")
 }
 func (r *Runtime) GetBus() bus.Bus                          { return r.bus }
 func (r *Runtime) AgentManager() agent.AgentManager         { return r.agentManager }

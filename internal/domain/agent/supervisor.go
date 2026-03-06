@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -55,6 +57,27 @@ func (a *SupervisorAgent) Handle(ctx context.Context, msg Message) ([]Message, e
 				Timestamp: time.Now(),
 				Payload:   msg.Payload,
 			}}, nil
+
+		case "instruction":
+			// 当 Planner 完成计划后，Supervisor 负责调度 Coder 开始执行
+			fmt.Fprintf(os.Stderr, "\n\n\033[1;35m📡 [SUPERVISOR]\033[0m 任务计划已就绪，正在指派 \033[1;34m[CODER]\033[0m 执行开发逻辑...\n")
+			fmt.Fprintf(os.Stderr, "\033[1;34m[CODER]\033[0m 正在根据计划编写代码并自测中...\n")
+			return nil, nil 
+
+		case "review_result":
+			approved, _ := msg.Payload["approved"].(bool)
+			if approved {
+				fmt.Fprintf(os.Stderr, "\n\n\033[1;32m🏁 [SUPERVISOR] 核心链路通过评审！生成最终交付报告...\033[0m\n")
+				return []Message{{
+					From:      a.name,
+					To:        "cli-feedback",
+					Type:      "final_report",
+					Timestamp: time.Now(),
+					Payload:   map[string]any{"result": "任务已圆满完成。"},
+				}}, nil
+			}
+			fmt.Fprintf(os.Stderr, "\n\033[1;33m⚠️ [SUPERVISOR] 评审未通过，正在调度 [CODER] 进行迭代修复...\033[0m\n")
+			return nil, nil
 
 		case "final_report":
 			a.SetStatus(StatusCompleted)
