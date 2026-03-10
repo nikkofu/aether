@@ -19,11 +19,11 @@ type subjectSub struct {
 
 // MemoryBus 实现了具备故障恢复能力的内存消息总线。
 type MemoryBus struct {
-	mu           sync.RWMutex
-	subscribers  []agent.Agent
-	subjectSubs  []subjectSub
-	queue        chan agent.Message
-	logger       logging.Logger
+	mu          sync.RWMutex
+	subscribers []agent.Agent
+	subjectSubs []subjectSub
+	queue       chan agent.Message
+	logger      logging.Logger
 }
 
 func (b *MemoryBus) SubscribeToSubject(ctx context.Context, subject string, handler func(msg agent.Message)) {
@@ -38,7 +38,7 @@ func (b *MemoryBus) WaitReady(ctx context.Context) error {
 	if b.logger != nil {
 		b.logger.Debug(ctx, "正在等待 MemoryBus 就绪...")
 	}
-	
+
 	// 给一点极短的固定延迟，确保所有订阅 Goroutine 已经跑起来
 	select {
 	case <-time.After(100 * time.Millisecond):
@@ -113,7 +113,7 @@ func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 	for _, sub := range b.subscribers {
 		// 关键修复：支持广播与编排者监听，但增加“防止自循环”过滤
 		isOrchestrator := sub.Role() == "supervisor" || sub.Role() == "manager"
-		
+
 		// 1. 如果消息是从自己发出的，跳过（防止死循环和噪音）
 		if msg.From == sub.Name() {
 			continue
@@ -133,7 +133,7 @@ func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 				if r := recover(); r != nil {
 					stack := debug.Stack()
 					err := fmt.Errorf("代理 %s 发生崩溃 (Panic): %v", a.Name(), r)
-					
+
 					if b.logger != nil {
 						b.logger.Error(ctx, "代理崩溃拦截",
 							logging.String("agent", a.Name()),
@@ -144,14 +144,17 @@ func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 
 					// 发布系统告警以便 Supervisor 决策
 					b.Publish(ctx, agent.Message{
+						ID:        m.ID,
 						From:      a.Name(),
 						To:        "supervisor",
 						Type:      "system.alert",
 						Timestamp: time.Now(),
 						Payload: map[string]any{
-							"severity": "CRITICAL",
-							"message":  err.Error(),
-							"panic":    true,
+							"severity":  "CRITICAL",
+							"message":   err.Error(),
+							"panic":     true,
+							"origin_id": m.ID,
+							"task_id":   m.ID,
 						},
 					})
 				}
@@ -168,11 +171,18 @@ func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 				}
 				// 失败也上报给 Supervisor 触发重试逻辑
 				b.Publish(ctx, agent.Message{
+					ID:        m.ID,
 					From:      a.Name(),
 					To:        "supervisor",
 					Type:      "system.alert",
 					Timestamp: time.Now(),
-					Payload:   map[string]any{"severity": "HIGH", "message": err.Error(), "error": err.Error()},
+					Payload: map[string]any{
+						"severity":  "HIGH",
+						"message":   err.Error(),
+						"error":     err.Error(),
+						"origin_id": m.ID,
+						"task_id":   m.ID,
+					},
 				})
 				return
 			}

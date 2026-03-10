@@ -29,7 +29,7 @@ func NewPlannerAgent(name string, llm capability.Capability, tracer observabilit
 	}
 }
 
-func (a *PlannerAgent) SetManager(m AgentManager) { a.manager = m }
+func (a *PlannerAgent) SetManager(m AgentManager)  { a.manager = m }
 func (a *PlannerAgent) SetGraph(g knowledge.Graph) { a.graph = g }
 
 func (a *PlannerAgent) Handle(ctx context.Context, msg Message) ([]Message, error) {
@@ -89,19 +89,22 @@ Observation: 定义每个模块的成功交付标准。
 		// 5. 生成后续指令（如果 Manager 已注入）
 		// 注意：即便没有 Manager，我们也返回成功的消息列表，让总线继续流转
 		resMsg := Message{
+			ID:        msg.ID,
 			From:      a.name,
 			To:        "coder",
 			Type:      "instruction",
 			Timestamp: time.Now(),
 			Payload: map[string]any{
-				"plan": plan,
-				"task": description,
+				"plan":     plan,
+				"task":     description,
+				"task_id":  msg.Payload["task_id"],
+				"trace_id": msg.Payload["trace_id"],
 			},
 		}
 
 		// 如果 Manager 存在，则尝试 Spawn 一个 Coder
 		if a.manager != nil {
-			_ , _ = a.manager.Spawn(ctx, "coder", map[string]any{"task_id": msg.ID, "plan": plan})
+			_, _ = a.manager.Spawn(ctx, "coder", map[string]any{"task_id": msg.ID, "plan": plan})
 		}
 
 		return []Message{resMsg}, nil

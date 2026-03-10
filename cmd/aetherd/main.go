@@ -41,9 +41,19 @@ func main() {
 
 	// 4. 配置 Webhook HTTP Server
 	mux := http.NewServeMux()
-	
+
+	if rt.TaskService() == nil {
+		log.Fatal("task service is not initialized")
+	}
+
+	taskHandler := api.NewTaskHandler(rt.TaskService(), rt.Logger())
+	taskHandler.RegisterRoutes(mux)
+
+	systemHandler := api.NewSystemHandler(rt.TaskService(), rt.GetBus(), rt.AgentManager(), rt.Logger())
+	systemHandler.RegisterRoutes(mux)
+
 	// 注册 GitHub Webhook Handler
-	ghHandler := webhook.NewGitHubWebhookHandler(rt.GetBus(), rt.Logger())
+	ghHandler := webhook.NewGitHubWebhookHandler(rt.TaskService(), rt.Logger())
 	mux.HandleFunc("/webhooks/github", ghHandler.Handle)
 
 	// 注册实时事件流 Handler
@@ -57,7 +67,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    ":" + port,
-		Handler: mux,
+		Handler: withCORS(mux),
 	}
 
 	// 5. 启动服务器
@@ -74,11 +84,24 @@ func main() {
 	<-quit
 
 	rt.Logger().Info(ctx, "正在关闭 Aether Daemon...")
-	
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
-	
+
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		rt.Logger().Error(ctx, "Server shutdown error", logging.Err(err))
 	}
+}
+
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

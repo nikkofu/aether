@@ -38,13 +38,15 @@ func (a *CoderAgent) Handle(ctx context.Context, msg Message) ([]Message, error)
 				"plan":      msg.Payload["plan"],
 			})
 			defer span.End()
+		}
 
 		if msg.Type == "instruction" {
 			plan := msg.Payload["plan"].(string)
 			task := msg.Payload["task"].(string)
+			taskID, _ := msg.Payload["task_id"].(string)
 
 			prompt := fmt.Sprintf("基于规划实现代码：\n任务：%s\n规划：%s", task, plan)
-			
+
 			// 记录 LLM 动作
 			llmCtx, llmSpan := a.tracer.StartSpan(ctx, "Coder.LLM_Inference", map[string]any{
 				"prompt": prompt,
@@ -65,18 +67,28 @@ func (a *CoderAgent) Handle(ctx context.Context, msg Message) ([]Message, error)
 
 			return []Message{
 				{
+					ID:        msg.ID,
 					From:      a.name,
 					To:        "reviewer",
 					Type:      "review_request",
 					Timestamp: time.Now(),
-					Payload:   map[string]any{"code": code, "task": task},
+					Payload: map[string]any{
+						"code":    code,
+						"task":    task,
+						"task_id": taskID,
+					},
 				},
 				{
+					ID:        msg.ID,
 					From:      a.name,
 					To:        "supervisor",
 					Type:      "work_progress",
 					Timestamp: time.Now(),
-					Payload:   map[string]any{"status": "completed_coding", "code": code},
+					Payload: map[string]any{
+						"status":  "completed_coding",
+						"code":    code,
+						"task_id": taskID,
+					},
 				},
 			}, nil
 		}
@@ -87,17 +99,19 @@ func (a *CoderAgent) Handle(ctx context.Context, msg Message) ([]Message, error)
 			if approved {
 				// 如果审核通过，Coder 负责发布最终报告给 CLI
 				return []Message{{
+					ID:        msg.ID,
 					From:      a.name,
 					To:        "cli",
 					Type:      "final_report",
 					Timestamp: time.Now(),
-					Payload:   map[string]any{"result": msg.Payload["code"]},
+					Payload: map[string]any{
+						"result":  msg.Payload["code"],
+						"task_id": msg.Payload["task_id"],
+					},
 				}}, nil
 			}
 		}
 
-		return nil, nil
-		}
 		return nil, nil
 	})
 }

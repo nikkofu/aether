@@ -6,25 +6,27 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
-	"github.com/google/uuid"
-	"github.com/nikkofu/aether/internal/domain/agent"
-	"github.com/nikkofu/aether/pkg/bus"
+	taskdomain "github.com/nikkofu/aether/internal/domain/task"
+	taskusecase "github.com/nikkofu/aether/internal/usecase/task"
 	"github.com/nikkofu/aether/pkg/logging"
 )
 
+type TaskSubmitter interface {
+	Submit(ctx context.Context, input taskusecase.SubmitInput) (*taskdomain.Task, error)
+}
+
 // GitHubWebhookHandler 处理来自 GitHub 的事件。
 type GitHubWebhookHandler struct {
-	bus    bus.Bus
-	logger logging.Logger
+	submitter TaskSubmitter
+	logger    logging.Logger
 }
 
 // NewGitHubWebhookHandler 创建一个新的处理器实例。
-func NewGitHubWebhookHandler(b bus.Bus, l logging.Logger) *GitHubWebhookHandler {
+func NewGitHubWebhookHandler(submitter TaskSubmitter, l logging.Logger) *GitHubWebhookHandler {
 	return &GitHubWebhookHandler{
-		bus:    b,
-		logger: l,
+		submitter: submitter,
+		logger:    l,
 	}
 }
 
@@ -76,25 +78,34 @@ func (h *GitHubWebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 
-		// 发布系统消息，要求生成一个 Planner 代理来分析和处理该 Issue
-		taskID := "task-" + uuid.New().String()[:8]
 		prompt := fmt.Sprintf("Analyze and resolve the following GitHub Issue in %s:\nTitle: %s\n\nBody:\n%s\nURL: %s",
 			payload.Repository.FullName, payload.Issue.Title, payload.Issue.Body, payload.Issue.URL)
 
-		h.bus.Publish(context.Background(), agent.Message{
-			ID:        uuid.New().String(),
-			From:      "webhook_gateway",
-			To:        "manager", // 发送给 Manager 请求调度
-			Type:      "system.spawn",
-			Timestamp: time.Now(),
-			Payload: map[string]any{
-				"role": "planner",
-				"payload": map[string]any{
-					"task_id": taskID,
-					"prompt":  prompt,
-				},
+		task, err := h.submitter.Submit(r.Context(), taskusecase.SubmitInput{
+			Source:      "github_webhook",
+			Mode:        "agent",
+			Description: prompt,
+			Input: map[string]any{
+				"repository":  payload.Repository.FullName,
+				"issue_title": payload.Issue.Title,
+				"issue_body":  payload.Issue.Body,
+				"issue_url":   payload.Issue.URL,
+				"event":       event,
+				"action":      payload.Action,
 			},
 		})
+		if err != nil {
+			http.Error(w, "Failed to create task", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":  "accepted",
+			"task_id": task.ID,
+		})
+		return
 	}
 
 	w.WriteHeader(http.StatusOK)

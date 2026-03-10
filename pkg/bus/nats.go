@@ -82,6 +82,9 @@ func (b *NATSBus) Subscribe(a agent.Agent) {
 	subject := fmt.Sprintf("aether.agent.%s", a.Name())
 
 	handler := func(m *nats.Msg) {
+		var msg agent.Message
+		_ = json.Unmarshal(m.Data, &msg)
+
 		// 故障恢复：Panic Recovery
 		defer func() {
 			if r := recover(); r != nil {
@@ -93,17 +96,20 @@ func (b *NATSBus) Subscribe(a agent.Agent) {
 					)
 				}
 				b.Publish(context.Background(), agent.Message{
+					ID:        msg.ID,
 					From:      a.Name(),
 					To:        "supervisor",
 					Type:      "system.alert",
 					Timestamp: time.Now(),
-					Payload:   map[string]any{"severity": "CRITICAL", "message": "Panic occurred"},
+					Payload: map[string]any{
+						"severity":  "CRITICAL",
+						"message":   "Panic occurred",
+						"origin_id": msg.ID,
+						"task_id":   msg.ID,
+					},
 				})
 			}
 		}()
-
-		var msg agent.Message
-		json.Unmarshal(m.Data, &msg)
 
 		// OpenTelemetry Context Propagation: Extract
 		ctx := context.Background()
@@ -121,11 +127,17 @@ func (b *NATSBus) Subscribe(a agent.Agent) {
 				b.logger.Error(ctx, "分布式代理处理失败", logging.String("agent", a.Name()), logging.Err(err))
 			}
 			b.Publish(ctx, agent.Message{
+				ID:        msg.ID,
 				From:      a.Name(),
 				To:        "supervisor",
 				Type:      "system.alert",
 				Timestamp: time.Now(),
-				Payload:   map[string]any{"severity": "HIGH", "message": err.Error()},
+				Payload: map[string]any{
+					"severity":  "HIGH",
+					"message":   err.Error(),
+					"origin_id": msg.ID,
+					"task_id":   msg.ID,
+				},
 			})
 			return
 		}

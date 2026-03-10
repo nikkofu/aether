@@ -33,7 +33,9 @@ func (a *ReviewerAgent) Handle(ctx context.Context, msg Message) ([]Message, err
 	}
 
 	return a.ProtectedHandle(ctx, msg, func() ([]Message, error) {
-		if msg.Type != "review_request" { return nil, nil }
+		if msg.Type != "review_request" {
+			return nil, nil
+		}
 
 		code, _ := msg.Payload["code"].(string)
 		task, _ := msg.Payload["task"].(string)
@@ -51,13 +53,15 @@ Decision: [PASS] 或 [FAIL]
 Feedback: 详细的改进意见。
 
 开始评审：`, task, code)
-		
+
 		output, err := a.llmSkill.Execute(ctx, map[string]any{
-			"prompt":     prompt, 
+			"prompt":     prompt,
 			"agent_name": fmt.Sprintf("%s:reviewing", a.name),
 			"stream":     true,
 		})
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 
 		review, _ := output["output"].(string)
 		approved := !strings.Contains(strings.ToUpper(review), "DECISION: [FAIL]")
@@ -70,6 +74,7 @@ Feedback: 详细的改进意见。
 		}
 
 		return []Message{{
+			ID:        msg.ID,
 			From:      a.name,
 			To:        msg.From, // 回复给发送方
 			Type:      "review_result",
@@ -78,6 +83,7 @@ Feedback: 详细的改进意见。
 				"approved": approved,
 				"feedback": review,
 				"code":     code,
+				"task_id":  msg.Payload["task_id"],
 			},
 		}}, nil
 	})

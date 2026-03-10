@@ -51,6 +51,7 @@ func (a *SupervisorAgent) Handle(ctx context.Context, msg Message) ([]Message, e
 		switch msg.Type {
 		case "task":
 			return []Message{{
+				ID:        msg.ID,
 				From:      a.name,
 				To:        "planner",
 				Type:      "task_plan_request",
@@ -62,18 +63,22 @@ func (a *SupervisorAgent) Handle(ctx context.Context, msg Message) ([]Message, e
 			// 当 Planner 完成计划后，Supervisor 负责调度 Coder 开始执行
 			fmt.Fprintf(os.Stderr, "\n\n\033[1;35m📡 [SUPERVISOR]\033[0m 任务计划已就绪，正在指派 \033[1;34m[CODER]\033[0m 执行开发逻辑...\n")
 			fmt.Fprintf(os.Stderr, "\033[1;34m[CODER]\033[0m 正在根据计划编写代码并自测中...\n")
-			return nil, nil 
+			return nil, nil
 
 		case "review_result":
 			approved, _ := msg.Payload["approved"].(bool)
 			if approved {
 				fmt.Fprintf(os.Stderr, "\n\n\033[1;32m🏁 [SUPERVISOR] 核心链路通过评审！生成最终交付报告...\033[0m\n")
 				return []Message{{
+					ID:        msg.ID,
 					From:      a.name,
 					To:        "cli-feedback",
 					Type:      "final_report",
 					Timestamp: time.Now(),
-					Payload:   map[string]any{"result": "任务已圆满完成。"},
+					Payload: map[string]any{
+						"result":  "任务已圆满完成。",
+						"task_id": msg.Payload["task_id"],
+					},
 				}}, nil
 			}
 			fmt.Fprintf(os.Stderr, "\n\033[1;33m⚠️ [SUPERVISOR] 评审未通过，正在调度 [CODER] 进行迭代修复...\033[0m\n")
@@ -103,10 +108,14 @@ func (a *SupervisorAgent) Handle(ctx context.Context, msg Message) ([]Message, e
 }
 
 func (a *SupervisorAgent) handleReflection(ctx context.Context, msg Message) ([]Message, error) {
-	if a.graph == nil { return nil, nil }
+	if a.graph == nil {
+		return nil, nil
+	}
 
 	orgID, _ := msg.Payload["org_id"].(string)
-	if orgID == "" { orgID = "default" }
+	if orgID == "" {
+		orgID = "default"
+	}
 
 	analysis, _ := msg.Payload["analysis"].(string)
 	agentName, _ := msg.Payload["agent_name"].(string)
@@ -126,7 +135,7 @@ func (a *SupervisorAgent) handleReflection(ctx context.Context, msg Message) ([]
 	}
 
 	_ = a.graph.AddEntity(ctx, entity, orgID)
-	
+
 	if a.logger != nil {
 		a.logger.Info(ctx, "已记录 Agent 历史工程经验", logging.String("agent", agentName))
 	}
@@ -147,11 +156,16 @@ func (a *SupervisorAgent) handleAlert(ctx context.Context, msg Message) ([]Messa
 			a.retries[originMsgID] = count + 1
 			a.logger.Warn(ctx, "触发自愈重试", logging.Int("retry_count", count+1))
 			return []Message{{
+				ID:        msg.ID,
 				From:      a.name,
 				To:        "planner",
 				Type:      "task_plan_request",
 				Timestamp: time.Now(),
-				Payload:   map[string]any{"description": "自愈重试任务", "agent_name": a.name},
+				Payload: map[string]any{
+					"description": "自愈重试任务",
+					"agent_name":  a.name,
+					"task_id":     msg.Payload["task_id"],
+				},
 			}}, nil
 		}
 		a.SetStatus(StatusFailed)
