@@ -2,14 +2,15 @@ nodes:
   - id: plan
     skill: llm
     input:
-      adapter: gemini
+      adapter: ollama
       prompt: "Design a simple architecture for: {{input.goal}}"
 
   - id: implement
     skill: llm
     depends_on: [plan]
     input:
-      adapter: gemini
+      adapter: ollama
       prompt: "Based on this plan:\n{{plan.output}}\nImplement in Go."
+
 initial_data:
   goal: "default task"

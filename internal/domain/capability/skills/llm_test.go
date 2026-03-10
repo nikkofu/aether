@@ -40,11 +40,12 @@ func (m *MockAdapter) Stream(ctx context.Context, prompt string, onToken llm.Tok
 
 func TestLLMSkill_Execute_Basic(t *testing.T) {
 	mockAdapter := &MockAdapter{
-		ExecuteFunc: func(ctx context.Context, prompt string) (string, error) {
+		StreamFunc: func(ctx context.Context, prompt string, onToken llm.TokenCallback) error {
 			if !strings.Contains(prompt, "Hello Aether") {
-				return "", errors.New("unexpected prompt")
+				return errors.New("unexpected prompt")
 			}
-			return "Hello User", nil
+			onToken("Hello User")
+			return nil
 		},
 	}
 
@@ -58,6 +59,7 @@ func TestLLMSkill_Execute_Basic(t *testing.T) {
 		nil, // strategyStore
 		capability.NewDefaultRenderer(),
 		"Greet: {{.prompt_data.name}}",
+		nil, // bus
 	)
 
 	input := map[string]any{
@@ -81,12 +83,13 @@ func TestLLMSkill_Execute_Basic(t *testing.T) {
 
 func TestLLMSkill_Execute_CustomTemplate(t *testing.T) {
 	mockAdapter := &MockAdapter{
-		ExecuteFunc: func(ctx context.Context, prompt string) (string, error) {
-			return prompt, nil // 直接返回渲染后的 prompt 以便验证
+		StreamFunc: func(ctx context.Context, prompt string, onToken llm.TokenCallback) error {
+			onToken(prompt)
+			return nil // 直接返回渲染后的 prompt 以便验证
 		},
 	}
 
-	skill := NewLLMSkill("test-skill", mockAdapter, nil, nil, nil, nil, nil, nil, "Default template")
+	skill := NewLLMSkill("test-skill", mockAdapter, nil, nil, nil, nil, nil, nil, "Default template", nil)
 
 	input := map[string]any{
 		"prompt": "Custom: {{.prompt_data.val}}",
@@ -108,18 +111,18 @@ func TestLLMSkill_Execute_CustomTemplate(t *testing.T) {
 func TestLLMSkill_Execute_ErrorCase(t *testing.T) {
 	t.Run("AdapterError", func(t *testing.T) {
 		mockAdapter := &MockAdapter{
-			ExecuteFunc: func(ctx context.Context, prompt string) (string, error) {
-				return "", errors.New("network error")
+			StreamFunc: func(ctx context.Context, prompt string, onToken llm.TokenCallback) error {
+				return errors.New("network error")
 			},
 		}
 
-		skill := NewLLMSkill("error-skill", mockAdapter, nil, nil, nil, nil, nil, nil, "template")
+		skill := NewLLMSkill("error-skill", mockAdapter, nil, nil, nil, nil, nil, nil, "template", nil)
 		_, err := skill.Execute(context.Background(), map[string]any{"prompt_data": map[string]any{}})
 
 		if err == nil {
 			t.Fatal("期望得到错误，但实际没有")
 		}
-		
+
 		if !strings.Contains(err.Error(), "network error") {
 			t.Errorf("期望错误包含 'network error', 实际得到: %v", err)
 		}
@@ -128,8 +131,8 @@ func TestLLMSkill_Execute_ErrorCase(t *testing.T) {
 	t.Run("RenderingError", func(t *testing.T) {
 		mockAdapter := &MockAdapter{}
 		// 使用一个会触发渲染错误的模板 (引用不存在的函数)
-		skill := NewLLMSkill("render-error", mockAdapter, nil, nil, nil, nil, nil, nil, "{{.unknown | invalid_func}}")
-		
+		skill := NewLLMSkill("render-error", mockAdapter, nil, nil, nil, nil, nil, nil, "{{.unknown | invalid_func}}", nil)
+
 		_, err := skill.Execute(context.Background(), map[string]any{"prompt_data": map[string]any{}})
 		if err == nil {
 			t.Fatal("期望渲染失败，但实际成功")

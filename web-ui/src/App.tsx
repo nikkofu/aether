@@ -15,9 +15,10 @@ function App() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [status, setStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const daemonBaseUrl = import.meta.env.VITE_AETHERD_URL ?? 'http://localhost:8080';
 
   useEffect(() => {
-    const es = new EventSource('http://localhost:8080/stream');
+    const es = new EventSource(`${daemonBaseUrl}/stream`);
 
     es.onopen = () => setStatus('connected');
     
@@ -39,7 +40,7 @@ function App() {
     es.onerror = () => setStatus('error');
 
     return () => es.close();
-  }, []);
+  }, [daemonBaseUrl]);
 
   useEffect(() => {
     if (scrollRef.current) {

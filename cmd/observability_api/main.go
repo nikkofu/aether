@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/nikkofu/aether/pkg/observability/metrics"
 	"github.com/nikkofu/aether/pkg/observability/trace"
@@ -20,8 +21,13 @@ func main() {
 	// 设置路由
 	mux := setupRoutes(engine, metricsEngine)
 
-	log.Println("Observability API listening on :8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	port := os.Getenv("OBSERVABILITY_API_PORT")
+	if port == "" {
+		port = "8082"
+	}
+
+	log.Printf("Observability API listening on :%s\n", port)
+	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatal(err)
 	}
 }
