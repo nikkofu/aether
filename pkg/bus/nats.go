@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"sync"
@@ -17,10 +18,11 @@ import (
 
 // NATSBus 实现了具备分布式故障恢复的消息总线。
 type NATSBus struct {
-	conn   *nats.Conn
-	subs   []*nats.Subscription
-	mu     sync.Mutex
-	logger logging.Logger
+	conn                *nats.Conn
+	subs                []*nats.Subscription
+	mu                  sync.Mutex
+	logger              logging.Logger
+	taskContextProvider TaskContextProvider
 }
 
 func NewNATSBus(url string) (*NATSBus, error) {
@@ -35,6 +37,12 @@ func (b *NATSBus) SetLogger(l logging.Logger) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.logger = l
+}
+
+func (b *NATSBus) SetTaskContextProvider(provider TaskContextProvider) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.taskContextProvider = provider
 }
 
 func (b *NATSBus) Publish(ctx context.Context, msg agent.Message) {
@@ -67,6 +75,9 @@ func (b *NATSBus) SubscribeToSubject(ctx context.Context, subject string, handle
 		if err := json.Unmarshal(m.Data, &msg); err != nil {
 			return
 		}
+		if b.isTaskCancelled(taskIDFromMessage(msg)) {
+			return
+		}
 		handler(msg)
 	}
 
@@ -84,6 +95,10 @@ func (b *NATSBus) Subscribe(a agent.Agent) {
 	handler := func(m *nats.Msg) {
 		var msg agent.Message
 		_ = json.Unmarshal(m.Data, &msg)
+		msgTaskID := taskIDFromMessage(msg)
+		if b.isTaskCancelled(msgTaskID) {
+			return
+		}
 
 		// 故障恢复：Panic Recovery
 		defer func() {
@@ -117,12 +132,24 @@ func (b *NATSBus) Subscribe(a agent.Agent) {
 			ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier(msg.Header))
 		}
 
+		baseCtx, release := b.contextForTask(ctx, msgTaskID)
+		defer release()
+
 		// 故障恢复：Context 超时传播 (15分钟分布式执行上限)
-		ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+		ctx, cancel := context.WithTimeout(baseCtx, 15*time.Minute)
 		defer cancel()
 
 		responses, err := a.Handle(ctx, msg)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || b.isTaskCancelled(msgTaskID) {
+				if b.logger != nil {
+					b.logger.Info(context.Background(), "分布式任务执行已取消",
+						logging.String("agent", a.Name()),
+						logging.String("task_id", msgTaskID),
+					)
+				}
+				return
+			}
 			if b.logger != nil {
 				b.logger.Error(ctx, "分布式代理处理失败", logging.String("agent", a.Name()), logging.Err(err))
 			}
@@ -143,6 +170,9 @@ func (b *NATSBus) Subscribe(a agent.Agent) {
 		}
 
 		for _, resp := range responses {
+			if b.isTaskCancelled(msgTaskID) || b.isTaskCancelled(taskIDFromMessage(resp)) {
+				return
+			}
 			b.Publish(ctx, resp)
 		}
 	}
@@ -167,6 +197,28 @@ func (b *NATSBus) Start(ctx context.Context) {
 		s.Unsubscribe()
 	}
 	b.conn.Close()
+}
+
+func (b *NATSBus) contextForTask(parent context.Context, taskID string) (context.Context, func()) {
+	b.mu.Lock()
+	provider := b.taskContextProvider
+	b.mu.Unlock()
+
+	if provider == nil || taskID == "" {
+		return parent, func() {}
+	}
+	return provider.ContextForTask(parent, taskID)
+}
+
+func (b *NATSBus) isTaskCancelled(taskID string) bool {
+	b.mu.Lock()
+	provider := b.taskContextProvider
+	b.mu.Unlock()
+
+	if provider == nil || taskID == "" {
+		return false
+	}
+	return provider.IsTaskCancelled(taskID)
 }
 
 var _ Bus = (*NATSBus)(nil)

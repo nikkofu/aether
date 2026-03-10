@@ -6,6 +6,11 @@ import (
 	"github.com/nikkofu/aether/internal/domain/agent"
 )
 
+type TaskContextProvider interface {
+	ContextForTask(parent context.Context, taskID string) (context.Context, context.CancelFunc)
+	IsTaskCancelled(taskID string) bool
+}
+
 // Bus 定义了 Aether 系统的完整消息总线接口
 type Bus interface {
 	// Publish 发布消息

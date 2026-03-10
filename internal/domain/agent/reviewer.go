@@ -39,6 +39,10 @@ func (a *ReviewerAgent) Handle(ctx context.Context, msg Message) ([]Message, err
 
 		code, _ := msg.Payload["code"].(string)
 		task, _ := msg.Payload["task"].(string)
+		taskID, _ := msg.Payload["task_id"].(string)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 
 		fmt.Fprintf(os.Stderr, "\n🧐 [%s] 正在进行深度质量评审...\n", strings.ToUpper(a.name))
 
@@ -57,6 +61,7 @@ Feedback: 详细的改进意见。
 		output, err := a.llmSkill.Execute(ctx, map[string]any{
 			"prompt":     prompt,
 			"agent_name": fmt.Sprintf("%s:reviewing", a.name),
+			"task_id":    taskID,
 			"stream":     true,
 		})
 		if err != nil {
@@ -83,7 +88,7 @@ Feedback: 详细的改进意见。
 				"approved": approved,
 				"feedback": review,
 				"code":     code,
-				"task_id":  msg.Payload["task_id"],
+				"task_id":  taskID,
 			},
 		}}, nil
 	})

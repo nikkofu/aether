@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -19,11 +20,12 @@ type subjectSub struct {
 
 // MemoryBus 实现了具备故障恢复能力的内存消息总线。
 type MemoryBus struct {
-	mu          sync.RWMutex
-	subscribers []agent.Agent
-	subjectSubs []subjectSub
-	queue       chan agent.Message
-	logger      logging.Logger
+	mu                  sync.RWMutex
+	subscribers         []agent.Agent
+	subjectSubs         []subjectSub
+	queue               chan agent.Message
+	logger              logging.Logger
+	taskContextProvider TaskContextProvider
 }
 
 func (b *MemoryBus) SubscribeToSubject(ctx context.Context, subject string, handler func(msg agent.Message)) {
@@ -61,6 +63,12 @@ func (b *MemoryBus) SetLogger(l logging.Logger) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.logger = l
+}
+
+func (b *MemoryBus) SetTaskContextProvider(provider TaskContextProvider) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.taskContextProvider = provider
 }
 
 func (b *MemoryBus) Publish(ctx context.Context, msg agent.Message) {
@@ -101,6 +109,11 @@ func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 		fmt.Fprintf(os.Stderr, ">> [BUS] 📢 消息流转: %s -> %s (类型: %s)\n", msg.From, msg.To, msg.Type)
 	}
 
+	taskID := taskIDFromMessage(msg)
+	if b.isTaskCancelled(taskID) {
+		return
+	}
+
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -128,6 +141,8 @@ func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 
 		// 为每个代理启动受保护的协程
 		go func(a agent.Agent, m agent.Message) {
+			msgTaskID := taskIDFromMessage(m)
+
 			// 核心需求：Panic Recovery
 			defer func() {
 				if r := recover(); r != nil {
@@ -160,12 +175,25 @@ func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 				}
 			}()
 
+			baseCtx, release := b.contextForTask(ctx, msgTaskID)
+			defer release()
+
 			// 核心需求：超时取消 (企业级长任务处理限制)
-			handleCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+			handleCtx, cancel := context.WithTimeout(baseCtx, 15*time.Minute)
 			defer cancel()
+
+			if err := handleCtx.Err(); err != nil {
+				return
+			}
 
 			responses, err := a.Handle(handleCtx, m)
 			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(handleCtx.Err(), context.Canceled) || b.isTaskCancelled(msgTaskID) {
+					if b.logger != nil {
+						b.logger.Info(ctx, "任务执行已取消", logging.String("agent", a.Name()), logging.String("task_id", msgTaskID))
+					}
+					return
+				}
 				if b.logger != nil {
 					b.logger.Error(ctx, "代理处理消息失败", logging.String("agent", a.Name()), logging.Err(err))
 				}
@@ -188,10 +216,44 @@ func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 			}
 
 			for _, resp := range responses {
+				if b.isTaskCancelled(msgTaskID) || b.isTaskCancelled(taskIDFromMessage(resp)) {
+					return
+				}
 				b.Publish(ctx, resp)
 			}
 		}(sub, msg)
 	}
+}
+
+func (b *MemoryBus) contextForTask(parent context.Context, taskID string) (context.Context, func()) {
+	b.mu.RLock()
+	provider := b.taskContextProvider
+	b.mu.RUnlock()
+
+	if provider == nil || taskID == "" {
+		return parent, func() {}
+	}
+	return provider.ContextForTask(parent, taskID)
+}
+
+func (b *MemoryBus) isTaskCancelled(taskID string) bool {
+	b.mu.RLock()
+	provider := b.taskContextProvider
+	b.mu.RUnlock()
+
+	if provider == nil || taskID == "" {
+		return false
+	}
+	return provider.IsTaskCancelled(taskID)
+}
+
+func taskIDFromMessage(msg agent.Message) string {
+	if msg.Payload != nil {
+		if taskID, ok := msg.Payload["task_id"].(string); ok && taskID != "" {
+			return taskID
+		}
+	}
+	return msg.ID
 }
 
 var _ Bus = (*MemoryBus)(nil)

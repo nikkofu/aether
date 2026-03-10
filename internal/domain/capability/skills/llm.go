@@ -156,25 +156,33 @@ func (s *LLMSkill) callAdapter(ctx context.Context, adapter llm.Adapter, prompt 
 	
 	agentName, _ := input["agent_name"].(string)
 	if agentName == "" { agentName = "llm" }
+	taskID, _ := input["task_id"].(string)
 
 	startTime := time.Now()
 	if useStream {
 		var sb strings.Builder
 		
 		onToken := func(t string) {
+			if ctx.Err() != nil {
+				return
+			}
 			sb.WriteString(t)
 			
 			// 关键修复：将 Token 发布到统一的 "cli" 主题，确保与 main.go 对齐
 			if s.bus != nil {
 				go func(token string) {
-					s.bus.Publish(context.Background(), agent.Message{
+					payload := map[string]any{
+						"token": token,
+						"agent": agentName,
+					}
+					if taskID != "" {
+						payload["task_id"] = taskID
+					}
+					s.bus.Publish(ctx, agent.Message{
 						ID: fmt.Sprintf("tk-%d", time.Now().UnixNano()),
 						From: s.name, To: "cli",
 						Type: "token", Timestamp: time.Now(),
-						Payload: map[string]any{
-							"token": token,
-							"agent": agentName,
-						},
+						Payload: payload,
 					})
 				}(t)
 			}

@@ -217,6 +217,9 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 		r.riskGuard = risk.NewRiskGuard(r.ledger, 100000.0, 0.4, 0.2)
 		if r.taskStore != nil {
 			r.taskService = taskusecase.NewService(r.taskStore, r.bus, r.logger)
+			if awareBus, ok := r.bus.(interface{ SetTaskContextProvider(bus.TaskContextProvider) }); ok {
+				awareBus.SetTaskContextProvider(r.taskService)
+			}
 			r.taskService.StartObservers(context.Background())
 		}
 

@@ -79,6 +79,9 @@ func TestTaskAPI(t *testing.T) {
 		if taskResp.Status != taskdomain.StatusRunning {
 			t.Fatalf("expected running status, got %s", taskResp.Status)
 		}
+		if taskResp.Attempt != 1 {
+			t.Fatalf("expected attempt 1, got %d", taskResp.Attempt)
+		}
 
 		taskID = taskResp.ID
 	})
@@ -122,6 +125,12 @@ func TestTaskAPI(t *testing.T) {
 		}
 		if taskResp.Status != taskdomain.StatusRunning {
 			t.Fatalf("expected retried task to be running, got %s", taskResp.Status)
+		}
+		if taskResp.Attempt != 2 {
+			t.Fatalf("expected retried task attempt 2, got %d", taskResp.Attempt)
+		}
+		if taskResp.ParentTaskID != taskID {
+			t.Fatalf("expected parent task ID %s, got %s", taskID, taskResp.ParentTaskID)
 		}
 
 		retriedTaskID = taskResp.ID

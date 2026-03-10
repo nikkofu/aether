@@ -44,6 +44,9 @@ func (a *CoderAgent) Handle(ctx context.Context, msg Message) ([]Message, error)
 			plan := msg.Payload["plan"].(string)
 			task := msg.Payload["task"].(string)
 			taskID, _ := msg.Payload["task_id"].(string)
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 
 			prompt := fmt.Sprintf("基于规划实现代码：\n任务：%s\n规划：%s", task, plan)
 
@@ -51,7 +54,7 @@ func (a *CoderAgent) Handle(ctx context.Context, msg Message) ([]Message, error)
 			llmCtx, llmSpan := a.tracer.StartSpan(ctx, "Coder.LLM_Inference", map[string]any{
 				"prompt": prompt,
 			})
-			output, err := a.llmSkill.Execute(llmCtx, map[string]any{"prompt": prompt, "agent_name": a.name})
+			output, err := a.llmSkill.Execute(llmCtx, map[string]any{"prompt": prompt, "agent_name": a.name, "task_id": taskID})
 			if err != nil {
 				llmSpan.End()
 				return nil, err
@@ -64,6 +67,10 @@ func (a *CoderAgent) Handle(ctx context.Context, msg Message) ([]Message, error)
 				"generated_content": code,
 			})
 			resSpan.End()
+
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 
 			return []Message{
 				{

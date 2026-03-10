@@ -23,12 +23,14 @@ var (
 )
 
 type SubmitInput struct {
-	Source      string         `json:"source"`
-	Mode        string         `json:"mode"`
-	Description string         `json:"description"`
-	Input       map[string]any `json:"input"`
-	TraceID     string         `json:"trace_id"`
-	OrgID       string         `json:"org_id"`
+	ParentTaskID string         `json:"parent_task_id"`
+	Attempt      int            `json:"attempt"`
+	Source       string         `json:"source"`
+	Mode         string         `json:"mode"`
+	Description  string         `json:"description"`
+	Input        map[string]any `json:"input"`
+	TraceID      string         `json:"trace_id"`
+	OrgID        string         `json:"org_id"`
 }
 
 type Update struct {
@@ -36,11 +38,18 @@ type Update struct {
 	Event *taskdomain.Event `json:"event,omitempty"`
 }
 
+type executionState struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
 type Service struct {
 	store          taskdomain.Store
 	bus            bus.Bus
 	logger         logging.Logger
 	subscribeMu    sync.Once
+	executionMu    sync.Mutex
+	executions     map[string]*executionState
 	cancelledMu    sync.RWMutex
 	cancelled      map[string]struct{}
 	listenersMu    sync.RWMutex
@@ -50,11 +59,12 @@ type Service struct {
 
 func NewService(store taskdomain.Store, b bus.Bus, logger logging.Logger) *Service {
 	return &Service{
-		store:     store,
-		bus:       b,
-		logger:    logger,
-		cancelled: make(map[string]struct{}),
-		listeners: make(map[string]map[uint64]chan Update),
+		store:      store,
+		bus:        b,
+		logger:     logger,
+		executions: make(map[string]*executionState),
+		cancelled:  make(map[string]struct{}),
+		listeners:  make(map[string]map[uint64]chan Update),
 	}
 }
 
@@ -86,9 +96,14 @@ func (s *Service) Submit(ctx context.Context, input SubmitInput) (*taskdomain.Ta
 	if input.OrgID == "" {
 		input.OrgID = "default"
 	}
+	if input.Attempt <= 0 {
+		input.Attempt = 1
+	}
 
 	t := &taskdomain.Task{
 		ID:           uuid.New().String(),
+		ParentTaskID: input.ParentTaskID,
+		Attempt:      input.Attempt,
 		Source:       input.Source,
 		Mode:         input.Mode,
 		Description:  input.Description,
@@ -102,13 +117,17 @@ func (s *Service) Submit(ctx context.Context, input SubmitInput) (*taskdomain.Ta
 		return nil, err
 	}
 
+	s.ensureExecution(t.ID)
+
 	submittedEvent := &taskdomain.Event{
 		TaskID: t.ID,
 		Type:   "task.submitted",
 		Payload: map[string]any{
-			"description": input.Description,
-			"source":      input.Source,
-			"mode":        input.Mode,
+			"description":    input.Description,
+			"source":         input.Source,
+			"mode":           input.Mode,
+			"attempt":        input.Attempt,
+			"parent_task_id": input.ParentTaskID,
 		},
 	}
 	if err := s.store.AppendEvent(ctx, submittedEvent); err != nil {
@@ -172,7 +191,7 @@ func (s *Service) Cancel(ctx context.Context, id, reason string) (*taskdomain.Ta
 	}
 
 	if reason == "" {
-		reason = "Cancelled via API (soft stop only)."
+		reason = "Cancelled via API."
 	}
 
 	t.Status = taskdomain.StatusCancelled
@@ -182,13 +201,14 @@ func (s *Service) Cancel(ctx context.Context, id, reason string) (*taskdomain.Ta
 		return nil, err
 	}
 	s.markCancelled(t.ID)
+	s.cancelExecution(t.ID)
 
 	cancelEvent := &taskdomain.Event{
 		TaskID: t.ID,
 		Type:   "task.cancel_requested",
 		Payload: map[string]any{
 			"reason": reason,
-			"soft":   true,
+			"soft":   false,
 		},
 	}
 	if err := s.store.AppendEvent(ctx, cancelEvent); err != nil && s.logger != nil {
@@ -221,11 +241,13 @@ func (s *Service) Retry(ctx context.Context, id string) (*taskdomain.Task, error
 	input["retry_status"] = original.Status
 
 	retriedTask, err := s.Submit(ctx, SubmitInput{
-		Source:      "task_retry",
-		Mode:        original.Mode,
-		Description: original.Description,
-		Input:       input,
-		TraceID:     original.TraceID,
+		ParentTaskID: original.ID,
+		Attempt:      original.Attempt + 1,
+		Source:       "task_retry",
+		Mode:         original.Mode,
+		Description:  original.Description,
+		Input:        input,
+		TraceID:      original.TraceID,
 	})
 	if err != nil {
 		return nil, err
@@ -287,6 +309,36 @@ func (s *Service) Subscribe(taskID string, buffer int) (<-chan Update, func()) {
 	}
 
 	return ch, cancel
+}
+
+func (s *Service) ContextForTask(parent context.Context, taskID string) (context.Context, context.CancelFunc) {
+	if taskID == "" {
+		return context.WithCancel(parent)
+	}
+
+	execution := s.ensureExecution(taskID)
+	ctx, cancel := context.WithCancel(parent)
+	stop := context.AfterFunc(execution.ctx, cancel)
+
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
+func (s *Service) IsTaskCancelled(taskID string) bool {
+	if taskID == "" {
+		return false
+	}
+	if s.isCancelled(taskID) {
+		return true
+	}
+
+	task, err := s.store.Get(context.Background(), taskID)
+	if err != nil {
+		return false
+	}
+	return task.Status == taskdomain.StatusCancelled
 }
 
 func (s *Service) handleMessage(msg agentdomain.Message) {
@@ -379,6 +431,10 @@ func (s *Service) handleMessage(msg agentdomain.Message) {
 	if err := s.store.Update(ctx, t); err != nil && s.logger != nil {
 		s.logger.Error(ctx, "failed to update task state", logging.String("task_id", taskID), logging.Err(err))
 		return
+	}
+
+	if isTerminalStatus(t.Status) {
+		s.finishExecution(t.ID, t.Status)
 	}
 
 	s.publishUpdate(t, event)
@@ -476,4 +532,53 @@ func (s *Service) isCancelled(taskID string) bool {
 	defer s.cancelledMu.RUnlock()
 	_, ok := s.cancelled[taskID]
 	return ok
+}
+
+func (s *Service) ensureExecution(taskID string) *executionState {
+	s.executionMu.Lock()
+	defer s.executionMu.Unlock()
+
+	if execution, ok := s.executions[taskID]; ok {
+		return execution
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	execution := &executionState{
+		ctx:    ctx,
+		cancel: cancel,
+	}
+	s.executions[taskID] = execution
+	return execution
+}
+
+func (s *Service) cancelExecution(taskID string) {
+	s.executionMu.Lock()
+	execution := s.executions[taskID]
+	s.executionMu.Unlock()
+	if execution != nil {
+		execution.cancel()
+	}
+}
+
+func (s *Service) finishExecution(taskID string, status taskdomain.Status) {
+	if status == taskdomain.StatusCancelled {
+		s.markCancelled(taskID)
+	}
+
+	s.executionMu.Lock()
+	execution := s.executions[taskID]
+	delete(s.executions, taskID)
+	s.executionMu.Unlock()
+	if execution != nil {
+		execution.cancel()
+	}
+}
+
+func isTerminalStatus(status taskdomain.Status) bool {
+	switch status {
+	case taskdomain.StatusCompleted, taskdomain.StatusFailed, taskdomain.StatusCancelled:
+		return true
+	default:
+		return false
+	}
 }

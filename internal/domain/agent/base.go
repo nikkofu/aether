@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"strings"
@@ -33,15 +34,17 @@ func NewBaseAgent(name, role string) *BaseAgent {
 func (b *BaseAgent) Name() string { return b.name }
 func (b *BaseAgent) Role() string { return b.role }
 
-func (b *BaseAgent) Status() Status { return b.status }
+func (b *BaseAgent) Status() Status     { return b.status }
 func (b *BaseAgent) SetStatus(s Status) { b.status = s }
 
 func (b *BaseAgent) SetLogger(l logging.Logger) { b.logger = l }
-func (b *BaseAgent) SetBus(bus Bus) { b.bus = bus }
+func (b *BaseAgent) SetBus(bus Bus)             { b.bus = bus }
 
 func (b *BaseAgent) Metadata() map[string]any {
 	res := make(map[string]any)
-	for k, v := range b.metadata { res[k] = v }
+	for k, v := range b.metadata {
+		res[k] = v
+	}
 	return res
 }
 
@@ -72,6 +75,8 @@ func (b *BaseAgent) ProtectedHandle(ctx context.Context, msg Message, handler fu
 			}
 			b.SetStatus(StatusFailed)
 			span.RecordError(err)
+		} else if errors.Is(err, context.Canceled) {
+			b.SetStatus(StatusIdle)
 		} else if err != nil {
 			b.SetStatus(StatusFailed)
 			span.RecordError(err)
@@ -84,5 +89,7 @@ func (b *BaseAgent) ProtectedHandle(ctx context.Context, msg Message, handler fu
 }
 
 func (b *BaseAgent) HandleSystemMessage(ctx context.Context, msg Message) []Message { return nil }
-func (b *BaseAgent) Spawn(ctx context.Context, role string, payload map[string]any) (string, error) { return "", nil }
+func (b *BaseAgent) Spawn(ctx context.Context, role string, payload map[string]any) (string, error) {
+	return "", nil
+}
 func (b *BaseAgent) Shutdown(ctx context.Context) error { return nil }

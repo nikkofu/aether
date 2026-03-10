@@ -53,6 +53,7 @@ func (a *PlannerAgent) Handle(ctx context.Context, msg Message) ([]Message, erro
 		if description == "" {
 			return nil, fmt.Errorf("task description is empty")
 		}
+		taskID, _ := msg.Payload["task_id"].(string)
 
 		fmt.Fprintf(os.Stderr, "\n🧠 [%s] 正在启动 ReAct 推理循环...\n", strings.ToUpper(a.name))
 
@@ -68,6 +69,7 @@ Observation: 定义每个模块的成功交付标准。
 
 开始推理：`, description),
 			"agent_name": fmt.Sprintf("%s:reasoning", a.name),
+			"task_id":    taskID,
 			"stream":     true,
 		}
 
@@ -97,14 +99,14 @@ Observation: 定义每个模块的成功交付标准。
 			Payload: map[string]any{
 				"plan":     plan,
 				"task":     description,
-				"task_id":  msg.Payload["task_id"],
+				"task_id":  taskID,
 				"trace_id": msg.Payload["trace_id"],
 			},
 		}
 
 		// 如果 Manager 存在，则尝试 Spawn 一个 Coder
 		if a.manager != nil {
-			_, _ = a.manager.Spawn(ctx, "coder", map[string]any{"task_id": msg.ID, "plan": plan})
+			_, _ = a.manager.Spawn(ctx, "coder", map[string]any{"task_id": taskID, "plan": plan})
 		}
 
 		return []Message{resMsg}, nil

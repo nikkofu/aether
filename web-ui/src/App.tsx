@@ -6,6 +6,8 @@ type TaskStatus = 'queued' | 'running' | 'reviewing' | 'completed' | 'failed' | 
 
 interface Task {
   id: string;
+  parent_task_id?: string;
+  attempt: number;
   source: string;
   mode: string;
   description: string;
@@ -601,8 +603,18 @@ function App() {
                         <p className="font-mono text-slate-200">{selectedTask.mode}</p>
                       </div>
                       <div>
+                        <p className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-500">Attempt</p>
+                        <p className="font-mono text-slate-200">{selectedTask.attempt}</p>
+                      </div>
+                      <div>
                         <p className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-500">Updated</p>
                         <p className="font-mono text-slate-200">{new Date(selectedTask.updated_at).toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-500">Parent Task</p>
+                        <p className="break-all font-mono text-xs text-slate-300">
+                          {selectedTask.parent_task_id || 'Primary attempt'}
+                        </p>
                       </div>
                       <div>
                         <p className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-500">Trace ID</p>

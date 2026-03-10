@@ -29,6 +29,8 @@ func (s *SQLiteStore) init(ctx context.Context) error {
 	query := `
 	CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
+		parent_task_id TEXT,
+		attempt INTEGER NOT NULL DEFAULT 1,
 		source TEXT NOT NULL,
 		mode TEXT NOT NULL,
 		description TEXT NOT NULL,
@@ -57,8 +59,18 @@ func (s *SQLiteStore) init(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_task_events_task_created_at ON task_events(task_id, created_at DESC);
 	`
 
-	_, err := s.db.ExecContext(ctx, query)
-	return err
+	if _, err := s.db.ExecContext(ctx, query); err != nil {
+		return err
+	}
+
+	if err := s.ensureTaskColumn(ctx, "parent_task_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureTaskColumn(ctx, "attempt", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *SQLiteStore) Create(ctx context.Context, t *Task) error {
@@ -68,13 +80,18 @@ func (s *SQLiteStore) Create(ctx context.Context, t *Task) error {
 	if t.UpdatedAt.IsZero() {
 		t.UpdatedAt = t.CreatedAt
 	}
+	if t.Attempt <= 0 {
+		t.Attempt = 1
+	}
 
 	inputJSON, _ := json.Marshal(t.Input)
 	_, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO tasks (id, source, mode, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO tasks (id, parent_task_id, attempt, source, mode, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID,
+		t.ParentTaskID,
+		t.Attempt,
 		t.Source,
 		t.Mode,
 		t.Description,
@@ -93,7 +110,7 @@ func (s *SQLiteStore) Create(ctx context.Context, t *Task) error {
 func (s *SQLiteStore) Get(ctx context.Context, id string) (*Task, error) {
 	row := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, source, mode, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at
+		`SELECT id, parent_task_id, COALESCE(attempt, 1), source, mode, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at
 		 FROM tasks WHERE id = ?`,
 		id,
 	)
@@ -102,6 +119,8 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*Task, error) {
 	var inputJSON string
 	err := row.Scan(
 		&t.ID,
+		&t.ParentTaskID,
+		&t.Attempt,
 		&t.Source,
 		&t.Mode,
 		&t.Description,
@@ -135,7 +154,7 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*Task, error) {
 
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT id, source, mode, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at
+		`SELECT id, parent_task_id, COALESCE(attempt, 1), source, mode, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at
 		 FROM tasks ORDER BY created_at DESC LIMIT ?`,
 		limit,
 	)
@@ -150,6 +169,8 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*Task, error) {
 		var inputJSON string
 		if err := rows.Scan(
 			&t.ID,
+			&t.ParentTaskID,
+			&t.Attempt,
 			&t.Source,
 			&t.Mode,
 			&t.Description,
@@ -179,8 +200,10 @@ func (s *SQLiteStore) Update(ctx context.Context, t *Task) error {
 	res, err := s.db.ExecContext(
 		ctx,
 		`UPDATE tasks
-		 SET source = ?, mode = ?, description = ?, input_json = ?, status = ?, trace_id = ?, current_stage = ?, final_output = ?, error_summary = ?, updated_at = ?
+		 SET parent_task_id = ?, attempt = ?, source = ?, mode = ?, description = ?, input_json = ?, status = ?, trace_id = ?, current_stage = ?, final_output = ?, error_summary = ?, updated_at = ?
 		 WHERE id = ?`,
+		t.ParentTaskID,
+		t.Attempt,
 		t.Source,
 		t.Mode,
 		t.Description,
@@ -276,6 +299,37 @@ func (s *SQLiteStore) ListEvents(ctx context.Context, taskID string, limit int) 
 	}
 
 	return events, rows.Err()
+}
+
+func (s *SQLiteStore) ensureTaskColumn(ctx context.Context, name, definition string) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(tasks)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid       int
+			column    string
+			dataType  string
+			notNull   int
+			defaultV  sql.NullString
+			primaryID int
+		)
+		if err := rows.Scan(&cid, &column, &dataType, &notNull, &defaultV, &primaryID); err != nil {
+			return err
+		}
+		if column == name {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE tasks ADD COLUMN %s %s", name, definition))
+	return err
 }
 
 var _ Store = (*SQLiteStore)(nil)

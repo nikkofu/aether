@@ -18,6 +18,8 @@ const (
 
 type Task struct {
 	ID           string         `json:"id"`
+	ParentTaskID string         `json:"parent_task_id,omitempty"`
+	Attempt      int            `json:"attempt"`
 	Source       string         `json:"source"`
 	Mode         string         `json:"mode"`
 	Description  string         `json:"description"`
