@@ -2,7 +2,7 @@ import { startTransition, useEffect, useState, type FormEvent } from 'react';
 import { Activity, ChevronRight, Clock3, FileText, ListTodo, RotateCcw, Server, ShieldCheck, Sparkles, Square, TerminalSquare, Wifi } from 'lucide-react';
 import './App.css';
 
-type TaskStatus = 'queued' | 'running' | 'reviewing' | 'completed' | 'failed' | 'cancelled';
+type TaskStatus = 'queued' | 'running' | 'reviewing' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
 
 interface Task {
   id: string;
@@ -366,13 +366,15 @@ function App() {
         return 'border-sky-500/30 bg-sky-500/10 text-sky-200';
       case 'cancelled':
         return 'border-slate-500/30 bg-slate-500/10 text-slate-300';
+      case 'interrupted':
+        return 'border-orange-500/30 bg-orange-500/10 text-orange-200';
       default:
         return 'border-indigo-500/30 bg-indigo-500/10 text-indigo-200';
     }
   }
 
   const canCancel = selectedTask ? ['queued', 'running', 'reviewing'].includes(selectedTask.status) : false;
-  const canRetry = selectedTask ? ['completed', 'failed', 'cancelled'].includes(selectedTask.status) : false;
+  const canRetry = selectedTask ? ['completed', 'failed', 'cancelled', 'interrupted'].includes(selectedTask.status) : false;
 
   return (
     <div className="w-full min-h-screen px-4 py-6 md:px-6">

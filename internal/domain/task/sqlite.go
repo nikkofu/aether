@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -152,46 +153,42 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*Task, error) {
 		limit = 100
 	}
 
+	rows, err := s.db.QueryContext(ctx, taskSelectSQL(`ORDER BY created_at DESC LIMIT ?`), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanTasks(rows)
+}
+
+func (s *SQLiteStore) ListByStatus(ctx context.Context, statuses []Status, limit int) ([]*Task, error) {
+	if len(statuses) == 0 {
+		return []*Task{}, nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	placeholders := make([]string, 0, len(statuses))
+	args := make([]any, 0, len(statuses)+1)
+	for _, status := range statuses {
+		placeholders = append(placeholders, "?")
+		args = append(args, status)
+	}
+	args = append(args, limit)
+
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT id, parent_task_id, COALESCE(attempt, 1), source, mode, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at
-		 FROM tasks ORDER BY created_at DESC LIMIT ?`,
-		limit,
+		taskSelectSQL(fmt.Sprintf("WHERE status IN (%s) ORDER BY updated_at DESC LIMIT ?", strings.Join(placeholders, ","))),
+		args...,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var tasks []*Task
-	for rows.Next() {
-		var t Task
-		var inputJSON string
-		if err := rows.Scan(
-			&t.ID,
-			&t.ParentTaskID,
-			&t.Attempt,
-			&t.Source,
-			&t.Mode,
-			&t.Description,
-			&inputJSON,
-			&t.Status,
-			&t.TraceID,
-			&t.CurrentStage,
-			&t.FinalOutput,
-			&t.ErrorSummary,
-			&t.CreatedAt,
-			&t.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		if inputJSON != "" {
-			_ = json.Unmarshal([]byte(inputJSON), &t.Input)
-		}
-		tasks = append(tasks, &t)
-	}
-
-	return tasks, rows.Err()
+	return scanTasks(rows)
 }
 
 func (s *SQLiteStore) Update(ctx context.Context, t *Task) error {
@@ -330,6 +327,43 @@ func (s *SQLiteStore) ensureTaskColumn(ctx context.Context, name, definition str
 
 	_, err = s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE tasks ADD COLUMN %s %s", name, definition))
 	return err
+}
+
+func taskSelectSQL(suffix string) string {
+	return `SELECT id, parent_task_id, COALESCE(attempt, 1), source, mode, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at
+		 FROM tasks ` + suffix
+}
+
+func scanTasks(rows *sql.Rows) ([]*Task, error) {
+	var tasks []*Task
+	for rows.Next() {
+		var t Task
+		var inputJSON string
+		if err := rows.Scan(
+			&t.ID,
+			&t.ParentTaskID,
+			&t.Attempt,
+			&t.Source,
+			&t.Mode,
+			&t.Description,
+			&inputJSON,
+			&t.Status,
+			&t.TraceID,
+			&t.CurrentStage,
+			&t.FinalOutput,
+			&t.ErrorSummary,
+			&t.CreatedAt,
+			&t.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if inputJSON != "" {
+			_ = json.Unmarshal([]byte(inputJSON), &t.Input)
+		}
+		tasks = append(tasks, &t)
+	}
+
+	return tasks, rows.Err()
 }
 
 var _ Store = (*SQLiteStore)(nil)

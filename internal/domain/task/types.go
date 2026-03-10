@@ -8,12 +8,13 @@ import (
 type Status string
 
 const (
-	StatusQueued    Status = "queued"
-	StatusRunning   Status = "running"
-	StatusReviewing Status = "reviewing"
-	StatusCompleted Status = "completed"
-	StatusFailed    Status = "failed"
-	StatusCancelled Status = "cancelled"
+	StatusQueued      Status = "queued"
+	StatusRunning     Status = "running"
+	StatusReviewing   Status = "reviewing"
+	StatusCompleted   Status = "completed"
+	StatusFailed      Status = "failed"
+	StatusCancelled   Status = "cancelled"
+	StatusInterrupted Status = "interrupted"
 )
 
 type Task struct {
@@ -48,6 +49,7 @@ type Store interface {
 	Create(ctx context.Context, t *Task) error
 	Get(ctx context.Context, id string) (*Task, error)
 	List(ctx context.Context, limit int) ([]*Task, error)
+	ListByStatus(ctx context.Context, statuses []Status, limit int) ([]*Task, error)
 	Update(ctx context.Context, t *Task) error
 	AppendEvent(ctx context.Context, e *Event) error
 	ListEvents(ctx context.Context, taskID string, limit int) ([]*Event, error)

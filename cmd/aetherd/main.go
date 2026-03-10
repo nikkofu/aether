@@ -36,15 +36,21 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	if rt.TaskService() == nil {
+		log.Fatal("task service is not initialized")
+	}
+
+	if recovered, err := rt.TaskService().RecoverInterrupted(ctx); err != nil {
+		log.Fatalf("failed to recover interrupted tasks: %v", err)
+	} else if recovered > 0 {
+		rt.Logger().Warn(ctx, "Recovered interrupted tasks", logging.Int("count", recovered))
+	}
+
 	// 3. 启动所有总线订阅和系统代理
 	go rt.StartAgents(ctx)
 
 	// 4. 配置 Webhook HTTP Server
 	mux := http.NewServeMux()
-
-	if rt.TaskService() == nil {
-		log.Fatal("task service is not initialized")
-	}
 
 	taskHandler := api.NewTaskHandler(rt.TaskService(), rt.Logger())
 	taskHandler.RegisterRoutes(mux)

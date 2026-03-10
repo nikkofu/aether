@@ -272,6 +272,62 @@ func (s *Service) Retry(ctx context.Context, id string) (*taskdomain.Task, error
 	return retriedTask, nil
 }
 
+func (s *Service) RecoverInterrupted(ctx context.Context) (int, error) {
+	tasks, err := s.store.ListByStatus(ctx, []taskdomain.Status{
+		taskdomain.StatusQueued,
+		taskdomain.StatusRunning,
+		taskdomain.StatusReviewing,
+	}, 500)
+	if err != nil {
+		return 0, err
+	}
+
+	recovered := 0
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+
+		previousStatus := task.Status
+		task.Status = taskdomain.StatusInterrupted
+		task.CurrentStage = "interrupted"
+		if task.ErrorSummary == "" {
+			task.ErrorSummary = "Task execution was interrupted before daemon recovery completed."
+		}
+
+		if err := s.store.Update(ctx, task); err != nil {
+			if s.logger != nil {
+				s.logger.Error(ctx, "failed to mark task interrupted",
+					logging.String("task_id", task.ID),
+					logging.Err(err),
+				)
+			}
+			continue
+		}
+
+		event := &taskdomain.Event{
+			TaskID: task.ID,
+			Type:   "task.interrupted",
+			Payload: map[string]any{
+				"previous_status": previousStatus,
+				"recovered_at":    time.Now().UTC().Format(time.RFC3339),
+			},
+		}
+		if err := s.store.AppendEvent(ctx, event); err != nil && s.logger != nil {
+			s.logger.Error(ctx, "failed to append interrupted task event",
+				logging.String("task_id", task.ID),
+				logging.Err(err),
+			)
+		}
+
+		s.finishExecution(task.ID, taskdomain.StatusInterrupted)
+		s.publishUpdate(task, event)
+		recovered++
+	}
+
+	return recovered, nil
+}
+
 func (s *Service) Subscribe(taskID string, buffer int) (<-chan Update, func()) {
 	if buffer <= 0 {
 		buffer = 32
@@ -576,7 +632,7 @@ func (s *Service) finishExecution(taskID string, status taskdomain.Status) {
 
 func isTerminalStatus(status taskdomain.Status) bool {
 	switch status {
-	case taskdomain.StatusCompleted, taskdomain.StatusFailed, taskdomain.StatusCancelled:
+	case taskdomain.StatusCompleted, taskdomain.StatusFailed, taskdomain.StatusCancelled, taskdomain.StatusInterrupted:
 		return true
 	default:
 		return false
