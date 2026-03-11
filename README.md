@@ -80,6 +80,7 @@ go build -o aether cmd/aether/main.go
 The daemon exposes the live event stream and GitHub webhook endpoint.
 
 ```bash
+AETHER_GITHUB_WEBHOOK_SECRET=change-me \
 go run cmd/aetherd/main.go
 ```
 
@@ -89,6 +90,12 @@ Default endpoints:
 - `POST http://localhost:8080/webhooks/github`
 
 You can override the daemon port with `AETHERD_PORT`.
+
+Webhook notes:
+
+- set `AETHER_GITHUB_WEBHOOK_SECRET` to enable `X-Hub-Signature-256` verification
+- deliveries are deduplicated by `X-GitHub-Delivery` in SQLite, so replayed payloads do not create duplicate tasks
+- interrupted daemon tasks are marked as `interrupted` on restart and can be retried from the control plane
 
 ## Run the Web UI
 

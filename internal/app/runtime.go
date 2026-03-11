@@ -362,6 +362,7 @@ func (r *Runtime) GetBus() bus.Bus                  { return r.bus }
 func (r *Runtime) AgentManager() agent.AgentManager { return r.agentManager }
 func (r *Runtime) Logger() logging.Logger           { return r.logger }
 func (r *Runtime) Config() *config.Config           { return r.cfg }
+func (r *Runtime) DB() *sql.DB                      { return r.db }
 func (r *Runtime) Execute(ctx context.Context, adapter, prompt string) (string, error) {
 	a, ok := r.adapterMap[adapter]
 	if !ok {

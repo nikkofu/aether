@@ -59,7 +59,17 @@ func main() {
 	systemHandler.RegisterRoutes(mux)
 
 	// 注册 GitHub Webhook Handler
-	ghHandler := webhook.NewGitHubWebhookHandler(rt.TaskService(), rt.Logger())
+	deliveryStore, err := webhook.NewSQLiteDeliveryStore(rt.DB())
+	if err != nil {
+		log.Fatalf("failed to initialize webhook delivery store: %v", err)
+	}
+
+	ghHandler := webhook.NewGitHubWebhookHandler(
+		rt.TaskService(),
+		deliveryStore,
+		os.Getenv("AETHER_GITHUB_WEBHOOK_SECRET"),
+		rt.Logger(),
+	)
 	mux.HandleFunc("/webhooks/github", ghHandler.Handle)
 
 	// 注册实时事件流 Handler

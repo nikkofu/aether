@@ -76,6 +76,12 @@ Current public surfaces:
 - GitHub webhook intake
 - SSE event stream at `/stream`
 
+The daemon now also owns:
+
+- task persistence and control-plane APIs
+- webhook HMAC verification and delivery deduplication
+- startup recovery that marks unfinished tasks as `interrupted`
+
 The daemon is the natural place to evolve a future control plane API.
 
 ### 3. Pipeline Executor
