@@ -15,7 +15,7 @@ GO_CACHE_DIR="${AETHER_ACCEPTANCE_GOCACHE:-${ROOT_DIR}/.cache/go-build}"
 GO_MOD_CACHE_DIR="${AETHER_ACCEPTANCE_GOMODCACHE:-}"
 
 QUALITY_DESCRIPTION="Write exactly 3 bullet points for the Aether release readiness memo. Use these exact bullet prefixes: '- Ship Recommendation:', '- Blockers:', and '- Next Action:'. 'Ship Recommendation' means the public launch decision, not a vessel. The '- Ship Recommendation:' bullet must mention 'public launch decision'. The '- Blockers:' bullet must mention 'OpenTelemetry collector is not running'. The '- Next Action:' bullet must mention 'fix the OpenTelemetry collector'. Use only these facts: daemon health is ok; 16 agents are ready; Go tests pass; the web UI production build passes; the default model is gemma3:270m; OpenTelemetry collector is not running. Keep the total under 80 words. No introduction or conclusion."
-ARCHITECTURE_DESCRIPTION="请输出一份 Aether 正式发布前验收摘要，覆盖三个里程碑：运行稳定性、可观测性、交付交接。内容简洁，直接给结果。"
+ARCHITECTURE_DESCRIPTION="作为 Aether 首席架构师，请输出一份正式发布前的验收摘要。直接给出以下三个里程碑的具体结论：1. 运行稳定性（包含后端测试通过、16个智能体就绪）；2. 可观测性（包含 traces 导出、metrics API 端口 8082 正常）；3. 交付交接（包含 v1.9.0 标签推送、发布包已生成）。内容请保持在 150 字以内，使用清晰的 Markdown 列表，不要有开场白或自我介绍。"
 
 cleanup() {
   if [[ "${MANAGED_DAEMON}" == "1" && -n "${DAEMON_PID:-}" ]]; then
