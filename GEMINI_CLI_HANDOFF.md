@@ -7,7 +7,7 @@
 - Latest tagged release documented in the repo: `v1.8.1`
 - Current branch state: `main` contains additional work still listed under `CHANGELOG.md -> Unreleased`
 - GitHub sync status from this handoff: pushed to `origin/main`
-- Sync commit: `9d482edf5fe008b7660dce61cb0b9046383a8ab4`
+- Sync commit: `2551228e9785ee7b9d85af74c858f9c7957b7c43`
 
 ## Completed In This Turn
 
