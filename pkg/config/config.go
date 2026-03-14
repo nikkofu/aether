@@ -54,7 +54,7 @@ func Load(path string) (*Config, error) {
 	// 1. 设置默认值
 	v.SetDefault("app.mode", "single")
 	v.SetDefault("app.node_id", "default-node")
-	v.SetDefault("agent.max_spawn_per_task", 5)
+	v.SetDefault("agent.max_spawn_per_task", 50)
 	v.SetDefault("agent.max_concurrency", 20)
 	v.SetDefault("runtime.gemini_command", "gemini")
 	v.SetDefault("runtime.database_path", "./aether.db")

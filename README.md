@@ -1,8 +1,8 @@
 # Aether
 
-Latest tagged release: `v1.8.1`  
-Release date: `2026-03-11`  
-Main branch status: post-`v1.8.1` release-prep work is tracked under [`CHANGELOG.md` -> `Unreleased`](CHANGELOG.md#unreleased)
+Latest tagged release: `v1.9.0`  
+Release date: `2026-03-14`  
+Main branch status: post-`v1.9.0` release-prep work is tracked under [`CHANGELOG.md` -> `Unreleased`](CHANGELOG.md#unreleased)
 
 Aether is a Go-based multi-agent runtime focused on three things:
 
