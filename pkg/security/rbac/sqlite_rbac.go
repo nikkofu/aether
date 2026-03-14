@@ -11,7 +11,9 @@ type SQLiteRBAC struct {
 
 func NewSQLiteRBAC(db *sql.DB) (*SQLiteRBAC, error) {
 	r := &SQLiteRBAC{db: db}
-	if err := r.init(context.Background()); err != nil { return nil, err }
+	if err := r.init(context.Background()); err != nil {
+		return nil, err
+	}
 	return r, nil
 }
 
@@ -30,7 +32,9 @@ func (r *SQLiteRBAC) init(ctx context.Context) error {
 		);`,
 	}
 	for _, q := range queries {
-		if _, err := r.db.ExecContext(ctx, q); err != nil { return err }
+		if _, err := r.db.ExecContext(ctx, q); err != nil {
+			return err
+		}
 	}
 	return r.seedPermissions(ctx)
 }

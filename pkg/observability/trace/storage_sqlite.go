@@ -17,11 +17,37 @@ func NewSQLiteTraceStorage(path string) (*SQLiteTraceStorage, error) {
 		return nil, err
 	}
 
+	if err := configureSQLiteTraceDB(db); err != nil {
+		return nil, err
+	}
 	if err := createTables(db); err != nil {
 		return nil, err
 	}
 
 	return &SQLiteTraceStorage{db: db}, nil
+}
+
+func NewSQLiteTraceStorageWithDB(db *sql.DB) (*SQLiteTraceStorage, error) {
+	if db == nil {
+		return nil, sql.ErrConnDone
+	}
+
+	if err := configureSQLiteTraceDB(db); err != nil {
+		return nil, err
+	}
+	if err := createTables(db); err != nil {
+		return nil, err
+	}
+
+	return &SQLiteTraceStorage{db: db}, nil
+}
+
+func configureSQLiteTraceDB(db *sql.DB) error {
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func createTables(db *sql.DB) error {
@@ -133,7 +159,7 @@ func (s *SQLiteTraceStorage) GetRecentTraces(orgID string, limit int) ([]*Trace,
 	}
 	defer rows.Close()
 
-	var traces []*Trace
+	traces := make([]*Trace, 0)
 	for rows.Next() {
 		var t Trace
 		if err := rows.Scan(&t.ID, &t.OrgID, &t.StartedAt, &t.EndedAt); err != nil {

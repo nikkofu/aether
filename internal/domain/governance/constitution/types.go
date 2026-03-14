@@ -8,12 +8,12 @@ import (
 // ConstitutionalRule 定义了系统的元规则（宪法条文）。
 // 它是系统运行的最底层约束，通常由开发者设定或通过极高难度的治理投票修改。
 type ConstitutionalRule struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
 	// Immutable 如果为 true，则该规则不可被普通的提案 (Proposal) 修改。
-	Immutable   bool      `json:"immutable"`
-	CreatedAt   time.Time `json:"created_at"`
+	Immutable bool      `json:"immutable"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Constitution 定义了管理元规则及校验系统变更的核心接口。

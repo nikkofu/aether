@@ -119,9 +119,10 @@ func (h *GitHubWebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			payload.Repository.FullName, payload.Issue.Title, payload.Issue.Body, payload.Issue.URL)
 
 		task, err := h.submitter.Submit(r.Context(), taskusecase.SubmitInput{
-			Source:      "github_webhook",
-			Mode:        "agent",
-			Description: prompt,
+			Source:          "github_webhook",
+			Mode:            "agent",
+			WorkflowPattern: taskdomain.PatternSequential,
+			Description:     prompt,
 			Input: map[string]any{
 				"delivery_id": deliveryID,
 				"repository":  payload.Repository.FullName,

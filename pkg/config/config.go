@@ -62,9 +62,9 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("openai.model", "gpt-4o")
 	v.SetDefault("openai.temperature", 0.7)
 	v.SetDefault("openai.timeout", 120*time.Second)
-	
+
 	v.SetDefault("ollama.base_url", "http://localhost:11434")
-	v.SetDefault("ollama.model", "qwen2.5:0.5b") // 修正为 qwen 系列，用户指定 qwen3.5:0.8b 也可以，这里设为默认
+	v.SetDefault("ollama.model", "gemma3:270m") // 默认选择更稳定的本地轻量模型
 	v.SetDefault("ollama.temperature", 0.7)
 	v.SetDefault("ollama.timeout", 300*time.Second)
 

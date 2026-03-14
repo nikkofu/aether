@@ -2,9 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"sync"
 	"time"
 
 	"github.com/nikkofu/aether/internal/domain/knowledge"
@@ -15,21 +12,16 @@ import (
 // SupervisorAgent 负责编排和自进化决策。
 type SupervisorAgent struct {
 	BaseAgent
-	mu      sync.Mutex
-	tracer  observability.Tracer
-	logger  logging.Logger
-	retries map[string]int
-	graph   knowledge.Graph
+	tracer observability.Tracer
+	logger logging.Logger
+	graph  knowledge.Graph
 }
-
-const MaxRetryLimit = 3
 
 func NewSupervisorAgent(name string, t observability.Tracer, l logging.Logger) *SupervisorAgent {
 	return &SupervisorAgent{
 		BaseAgent: *NewBaseAgent(name, "supervisor"),
 		tracer:    t,
 		logger:    l,
-		retries:   make(map[string]int),
 	}
 }
 
@@ -49,43 +41,13 @@ func (a *SupervisorAgent) Handle(ctx context.Context, msg Message) ([]Message, e
 		}
 
 		switch msg.Type {
-		case "task":
-			return []Message{{
-				ID:        msg.ID,
-				From:      a.name,
-				To:        "planner",
-				Type:      "task_plan_request",
-				Timestamp: time.Now(),
-				Payload:   msg.Payload,
-			}}, nil
-
-		case "instruction":
-			// 当 Planner 完成计划后，Supervisor 负责调度 Coder 开始执行
-			fmt.Fprintf(os.Stderr, "\n\n\033[1;35m📡 [SUPERVISOR]\033[0m 任务计划已就绪，正在指派 \033[1;34m[CODER]\033[0m 执行开发逻辑...\n")
-			fmt.Fprintf(os.Stderr, "\033[1;34m[CODER]\033[0m 正在根据计划编写代码并自测中...\n")
-			return nil, nil
-
-		case "review_result":
-			approved, _ := msg.Payload["approved"].(bool)
-			if approved {
-				fmt.Fprintf(os.Stderr, "\n\n\033[1;32m🏁 [SUPERVISOR] 核心链路通过评审！生成最终交付报告...\033[0m\n")
-				return []Message{{
-					ID:        msg.ID,
-					From:      a.name,
-					To:        "cli-feedback",
-					Type:      "final_report",
-					Timestamp: time.Now(),
-					Payload: map[string]any{
-						"result":  "任务已圆满完成。",
-						"task_id": msg.Payload["task_id"],
-					},
-				}}, nil
-			}
-			fmt.Fprintf(os.Stderr, "\n\033[1;33m⚠️ [SUPERVISOR] 评审未通过，正在调度 [CODER] 进行迭代修复...\033[0m\n")
-			return nil, nil
-
 		case "final_report":
-			a.SetStatus(StatusCompleted)
+			if a.logger != nil {
+				a.logger.Info(ctx, "收到工作流最终交付",
+					logging.String("task_id", stringValue(msg.Payload["task_id"])),
+					logging.String("from", msg.From),
+				)
+			}
 			return nil, nil
 
 		case "system.alert":
@@ -144,31 +106,24 @@ func (a *SupervisorAgent) handleReflection(ctx context.Context, msg Message) ([]
 }
 
 func (a *SupervisorAgent) handleAlert(ctx context.Context, msg Message) ([]Message, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	severity, _ := msg.Payload["severity"].(string)
-	originMsgID, _ := msg.Payload["origin_id"].(string)
-
-	if severity == "CRITICAL" {
-		count := a.retries[originMsgID]
-		if count < MaxRetryLimit {
-			a.retries[originMsgID] = count + 1
-			a.logger.Warn(ctx, "触发自愈重试", logging.Int("retry_count", count+1))
-			return []Message{{
-				ID:        msg.ID,
-				From:      a.name,
-				To:        "planner",
-				Type:      "task_plan_request",
-				Timestamp: time.Now(),
-				Payload: map[string]any{
-					"description": "自愈重试任务",
-					"agent_name":  a.name,
-					"task_id":     msg.Payload["task_id"],
-				},
-			}}, nil
+	message, _ := msg.Payload["message"].(string)
+	if a.logger != nil {
+		if severity == "CRITICAL" || severity == "HIGH" {
+			a.logger.Error(ctx, "收到工作流告警",
+				logging.String("severity", severity),
+				logging.String("task_id", stringValue(msg.Payload["task_id"])),
+				logging.String("origin", msg.From),
+				logging.String("message", message),
+			)
+		} else {
+			a.logger.Warn(ctx, "收到工作流告警",
+				logging.String("severity", severity),
+				logging.String("task_id", stringValue(msg.Payload["task_id"])),
+				logging.String("origin", msg.From),
+				logging.String("message", message),
+			)
 		}
-		a.SetStatus(StatusFailed)
 	}
 
 	return nil, nil

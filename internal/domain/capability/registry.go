@@ -64,9 +64,9 @@ func (r *CapabilityRegistry) BatchExecute(ctx context.Context, inputs map[string
 		wg.Add(1)
 		go func(n string, c Capability, i map[string]any) {
 			defer wg.Done()
-			
+
 			output, err := c.Execute(ctx, i)
-			
+
 			mu.Lock()
 			results[n] = BatchExecuteResult{
 				CapName: n,
@@ -85,7 +85,7 @@ func (r *CapabilityRegistry) BatchExecute(ctx context.Context, inputs map[string
 func (r *CapabilityRegistry) ListNames() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	
+
 	names := make([]string, 0, len(r.capabilities))
 	for name := range r.capabilities {
 		names = append(names, name)

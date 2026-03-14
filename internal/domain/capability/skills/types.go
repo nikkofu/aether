@@ -17,18 +17,18 @@ type Skill struct {
 
 // SkillVersion 代表技能的一个具体版本，支持树状演进结构。
 type SkillVersion struct {
-	SkillID     string    `json:"skill_id"`
-	Version     string    `json:"version"`
+	SkillID string `json:"skill_id"`
+	Version string `json:"version"`
 	// Parent 指向该版本所继承或优化的父版本号。
-	Parent      string    `json:"parent,omitempty"`
+	Parent string `json:"parent,omitempty"`
 	// CodePath 指向该版本执行文件的路径。
-	CodePath    string    `json:"code_path"`
+	CodePath string `json:"code_path"`
 	// EntryPoint 是该版本的执行入口。
-	EntryPoint  string    `json:"entry_point"`
+	EntryPoint string `json:"entry_point"`
 	// Score 代表该版本的质量评分。
-	Score       float64   `json:"score"`
-	Active      bool      `json:"active"`
-	CreatedAt   time.Time `json:"created_at"`
+	Score     float64   `json:"score"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // SkillEngine 负责管理技能及其版本的注册、激活、演进及动态执行。

@@ -20,11 +20,13 @@ func (c *SearchCapability) Execute(ctx context.Context, req capabilities.Capabil
 	defer cancel()
 
 	query, _ := req.Params["query"].(string)
-	if query == "" { return capabilities.CapabilityResponse{Success: false, Error: "empty query"}, nil }
+	if query == "" {
+		return capabilities.CapabilityResponse{Success: false, Error: "empty query"}, nil
+	}
 
 	// 2. 模拟搜索请求
 	// 在生产环境中，此处应调用外部 API (如 Google/Bing Search API)
-	
+
 	// 模拟返回
 	results := []string{
 		"SearchResult 1: " + query + " relevant data...",

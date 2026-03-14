@@ -7,12 +7,12 @@ import (
 
 // Reflection 存储了对单次代理执行的深度评估结果。
 type Reflection struct {
-	ID           string        `json:"id"`
-	AgentName    string        `json:"agent_name"`
-	TaskID       string        `json:"task_id"`
-	Success      bool          `json:"success"`
-	Duration     time.Duration `json:"duration"`
-	Cost         float64       `json:"cost"`
+	ID              string        `json:"id"`
+	AgentName       string        `json:"agent_name"`
+	TaskID          string        `json:"task_id"`
+	Success         bool          `json:"success"`
+	Duration        time.Duration `json:"duration"`
+	Cost            float64       `json:"cost"`
 	ErrorMessage    string        `json:"error_message,omitempty"`
 	Analysis        string        `json:"analysis"`
 	Suggestions     []string      `json:"suggestions"`

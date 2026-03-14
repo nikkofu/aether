@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	taskdomain "github.com/nikkofu/aether/internal/domain/task"
 	taskusecase "github.com/nikkofu/aether/internal/usecase/task"
 	"github.com/nikkofu/aether/pkg/logging"
 )
@@ -105,12 +106,13 @@ func (h *TaskHandler) handleTask(w http.ResponseWriter, r *http.Request) {
 
 func (h *TaskHandler) createTask(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Source      string         `json:"source"`
-		Mode        string         `json:"mode"`
-		Description string         `json:"description"`
-		Input       map[string]any `json:"input"`
-		TraceID     string         `json:"trace_id"`
-		OrgID       string         `json:"org_id"`
+		Source          string                     `json:"source"`
+		Mode            string                     `json:"mode"`
+		WorkflowPattern taskdomain.WorkflowPattern `json:"workflow_pattern"`
+		Description     string                     `json:"description"`
+		Input           map[string]any             `json:"input"`
+		TraceID         string                     `json:"trace_id"`
+		OrgID           string                     `json:"org_id"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -119,12 +121,13 @@ func (h *TaskHandler) createTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	task, err := h.service.Submit(r.Context(), taskusecase.SubmitInput{
-		Source:      input.Source,
-		Mode:        input.Mode,
-		Description: input.Description,
-		Input:       input.Input,
-		TraceID:     input.TraceID,
-		OrgID:       input.OrgID,
+		Source:          input.Source,
+		Mode:            input.Mode,
+		WorkflowPattern: input.WorkflowPattern,
+		Description:     input.Description,
+		Input:           input.Input,
+		TraceID:         input.TraceID,
+		OrgID:           input.OrgID,
 	})
 	if err != nil {
 		h.writeError(w, r, http.StatusBadRequest, "task_submit_failed", err.Error(), err)

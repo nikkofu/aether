@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,10 +22,14 @@ import (
 func InitTracer(serviceName string) (func(context.Context) error, error) {
 	ctx := context.Background()
 
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("OTEL_SDK_DISABLED")), "true") {
+		return noopShutdown, nil
+	}
+
 	// 1. 从环境变量读取 OTEL_EXPORTER_OTLP_ENDPOINT
-	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	endpoint := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
 	if endpoint == "" {
-		endpoint = "localhost:4317"
+		return noopShutdown, nil
 	}
 
 	// 2. 配置 OTLP gRPC 导出器 (增加重试和超时控制)
@@ -80,7 +85,7 @@ func InitTracer(serviceName string) (func(context.Context) error, error) {
 	shutdown := func(ctx context.Context) error {
 		// 延迟一秒以确保最后一批数据进入发送队列
 		time.Sleep(1 * time.Second)
-		
+
 		// 设定关闭超时时间
 		shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
@@ -92,4 +97,8 @@ func InitTracer(serviceName string) (func(context.Context) error, error) {
 	}
 
 	return shutdown, nil
+}
+
+func noopShutdown(context.Context) error {
+	return nil
 }

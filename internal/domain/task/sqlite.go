@@ -34,6 +34,7 @@ func (s *SQLiteStore) init(ctx context.Context) error {
 		attempt INTEGER NOT NULL DEFAULT 1,
 		source TEXT NOT NULL,
 		mode TEXT NOT NULL,
+		workflow_pattern TEXT NOT NULL DEFAULT 'sequential',
 		description TEXT NOT NULL,
 		input_json TEXT,
 		status TEXT NOT NULL,
@@ -70,6 +71,9 @@ func (s *SQLiteStore) init(ctx context.Context) error {
 	if err := s.ensureTaskColumn(ctx, "attempt", "INTEGER NOT NULL DEFAULT 1"); err != nil {
 		return err
 	}
+	if err := s.ensureTaskColumn(ctx, "workflow_pattern", "TEXT NOT NULL DEFAULT 'sequential'"); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -84,17 +88,20 @@ func (s *SQLiteStore) Create(ctx context.Context, t *Task) error {
 	if t.Attempt <= 0 {
 		t.Attempt = 1
 	}
+	t.WorkflowPattern = NormalizeWorkflowPattern(t.WorkflowPattern)
+	t.Input = NormalizeTaskInput(t.WorkflowPattern, t.Input)
 
 	inputJSON, _ := json.Marshal(t.Input)
 	_, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO tasks (id, parent_task_id, attempt, source, mode, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO tasks (id, parent_task_id, attempt, source, mode, workflow_pattern, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID,
 		t.ParentTaskID,
 		t.Attempt,
 		t.Source,
 		t.Mode,
+		t.WorkflowPattern,
 		t.Description,
 		string(inputJSON),
 		t.Status,
@@ -111,7 +118,7 @@ func (s *SQLiteStore) Create(ctx context.Context, t *Task) error {
 func (s *SQLiteStore) Get(ctx context.Context, id string) (*Task, error) {
 	row := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, parent_task_id, COALESCE(attempt, 1), source, mode, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at
+		`SELECT id, parent_task_id, COALESCE(attempt, 1), source, mode, COALESCE(workflow_pattern, 'sequential'), description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at
 		 FROM tasks WHERE id = ?`,
 		id,
 	)
@@ -124,6 +131,7 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*Task, error) {
 		&t.Attempt,
 		&t.Source,
 		&t.Mode,
+		&t.WorkflowPattern,
 		&t.Description,
 		&inputJSON,
 		&t.Status,
@@ -144,6 +152,8 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*Task, error) {
 	if inputJSON != "" {
 		_ = json.Unmarshal([]byte(inputJSON), &t.Input)
 	}
+	t.WorkflowPattern = NormalizeWorkflowPattern(t.WorkflowPattern)
+	t.Input = NormalizeTaskInput(t.WorkflowPattern, t.Input)
 
 	return &t, nil
 }
@@ -193,16 +203,19 @@ func (s *SQLiteStore) ListByStatus(ctx context.Context, statuses []Status, limit
 
 func (s *SQLiteStore) Update(ctx context.Context, t *Task) error {
 	t.UpdatedAt = time.Now()
+	t.WorkflowPattern = NormalizeWorkflowPattern(t.WorkflowPattern)
+	t.Input = NormalizeTaskInput(t.WorkflowPattern, t.Input)
 	inputJSON, _ := json.Marshal(t.Input)
 	res, err := s.db.ExecContext(
 		ctx,
 		`UPDATE tasks
-		 SET parent_task_id = ?, attempt = ?, source = ?, mode = ?, description = ?, input_json = ?, status = ?, trace_id = ?, current_stage = ?, final_output = ?, error_summary = ?, updated_at = ?
+		 SET parent_task_id = ?, attempt = ?, source = ?, mode = ?, workflow_pattern = ?, description = ?, input_json = ?, status = ?, trace_id = ?, current_stage = ?, final_output = ?, error_summary = ?, updated_at = ?
 		 WHERE id = ?`,
 		t.ParentTaskID,
 		t.Attempt,
 		t.Source,
 		t.Mode,
+		t.WorkflowPattern,
 		t.Description,
 		string(inputJSON),
 		t.Status,
@@ -330,7 +343,7 @@ func (s *SQLiteStore) ensureTaskColumn(ctx context.Context, name, definition str
 }
 
 func taskSelectSQL(suffix string) string {
-	return `SELECT id, parent_task_id, COALESCE(attempt, 1), source, mode, description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at
+	return `SELECT id, parent_task_id, COALESCE(attempt, 1), source, mode, COALESCE(workflow_pattern, 'sequential'), description, input_json, status, trace_id, current_stage, final_output, error_summary, created_at, updated_at
 		 FROM tasks ` + suffix
 }
 
@@ -345,6 +358,7 @@ func scanTasks(rows *sql.Rows) ([]*Task, error) {
 			&t.Attempt,
 			&t.Source,
 			&t.Mode,
+			&t.WorkflowPattern,
 			&t.Description,
 			&inputJSON,
 			&t.Status,
@@ -360,6 +374,8 @@ func scanTasks(rows *sql.Rows) ([]*Task, error) {
 		if inputJSON != "" {
 			_ = json.Unmarshal([]byte(inputJSON), &t.Input)
 		}
+		t.WorkflowPattern = NormalizeWorkflowPattern(t.WorkflowPattern)
+		t.Input = NormalizeTaskInput(t.WorkflowPattern, t.Input)
 		tasks = append(tasks, &t)
 	}
 

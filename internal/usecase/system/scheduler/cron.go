@@ -36,7 +36,9 @@ func (s *SystemScheduler) Start(ctx context.Context) {
 }
 
 func (s *SystemScheduler) runReputationDecay(ctx context.Context, orgID string) {
-	if s.ledger == nil { return }
+	if s.ledger == nil {
+		return
+	}
 	const defaultDecayRate = 0.02
 	err := s.ledger.ApplyReputationDecay(ctx, orgID, defaultDecayRate)
 	if s.logger != nil {
@@ -49,7 +51,9 @@ func (s *SystemScheduler) runReputationDecay(ctx context.Context, orgID string) 
 }
 
 func (s *SystemScheduler) runTokenBurn(ctx context.Context, orgID string) {
-	if s.ledger == nil { return }
+	if s.ledger == nil {
+		return
+	}
 	const maxTotalSupply = 100000.0
 	err := s.ledger.BurnExcessTokens(ctx, orgID, maxTotalSupply)
 	if s.logger != nil {

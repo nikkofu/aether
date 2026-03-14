@@ -73,7 +73,9 @@ func (e *WASMExecutor) Execute(ctx context.Context, orgID, userID, skillID, wasm
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, nameOffset, nameLen, paramsOffset, paramsLen, retOffset, retLen uint32) {
 			// 限制调用次数
-			if callCount >= maxCalls { return }
+			if callCount >= maxCalls {
+				return
+			}
 			callCount++
 
 			// 读取能力名称和参数
@@ -96,10 +98,14 @@ func (e *WASMExecutor) Execute(ctx context.Context, orgID, userID, skillID, wasm
 		}).Export("request_capability").
 		Instantiate(childCtx)
 
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 
 	wasmBytes, err := os.ReadFile(wasmPath)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 
 	stdout := &bytes.Buffer{}
 	config := wazero.NewModuleConfig().
@@ -108,7 +114,9 @@ func (e *WASMExecutor) Execute(ctx context.Context, orgID, userID, skillID, wasm
 		WithStderr(io.Discard)
 
 	mod, err := e.runtime.InstantiateWithConfig(childCtx, wasmBytes, config)
-	if err != nil { return nil, fmt.Errorf("instantiate fail: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("instantiate fail: %w", err)
+	}
 	defer mod.Close(childCtx)
 
 	return stdout.Bytes(), nil

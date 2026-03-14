@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/nikkofu/aether/internal/domain/agent"
-	"github.com/nikkofu/aether/pkg/logging"
 	"github.com/nikkofu/aether/internal/domain/strategy/strategic"
+	"github.com/nikkofu/aether/pkg/logging"
 )
 
 // VisionBoardAgent 代表愿景委员会。
@@ -25,9 +25,9 @@ func NewVisionBoardAgent(id string, planner strategic.StrategicPlanner, logger l
 	}
 }
 
-func (a *VisionBoardAgent) ID() string           { return a.Name() }
-func (a *VisionBoardAgent) Level() OrgLevel      { return LevelVision }
-func (a *VisionBoardAgent) Supervisor() string    { return a.supervisor }
+func (a *VisionBoardAgent) ID() string             { return a.Name() }
+func (a *VisionBoardAgent) Level() OrgLevel        { return LevelVision }
+func (a *VisionBoardAgent) Supervisor() string     { return a.supervisor }
 func (a *VisionBoardAgent) Subordinates() []string { return a.subs }
 
 func (a *VisionBoardAgent) Handle(ctx context.Context, msg agent.Message) ([]agent.Message, error) {
@@ -38,10 +38,14 @@ func (a *VisionBoardAgent) Handle(ctx context.Context, msg agent.Message) ([]age
 			desc, _ := msg.Payload["description"].(string)
 
 			v, err := a.planner.CreateVision(ctx, title, desc)
-			if err != nil { return nil, err }
+			if err != nil {
+				return nil, err
+			}
 
 			goals, err := a.planner.PlanGoals(ctx, *v)
-			if err != nil { return nil, err }
+			if err != nil {
+				return nil, err
+			}
 
 			var msgs []agent.Message
 			for _, g := range goals {

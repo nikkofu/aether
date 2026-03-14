@@ -7,12 +7,12 @@ import (
 
 // RateLimiter 实现了基于内存的简单速率控制。
 type RateLimiter struct {
-	mu           sync.Mutex
-	skillCounts  map[string]int // skillID -> count
-	orgCounts    map[string]int // orgID -> count
-	lastReset    time.Time
-	SkillLimit   int
-	OrgLimit     int
+	mu          sync.Mutex
+	skillCounts map[string]int // skillID -> count
+	orgCounts   map[string]int // orgID -> count
+	lastReset   time.Time
+	SkillLimit  int
+	OrgLimit    int
 }
 
 func NewRateLimiter(skillLimit, orgLimit int) *RateLimiter {

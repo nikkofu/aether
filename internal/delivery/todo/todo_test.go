@@ -19,7 +19,7 @@ func (d *dummyLogger) Debug(ctx context.Context, msg string, fields ...logging.F
 func (d *dummyLogger) Info(ctx context.Context, msg string, fields ...logging.Field)  {}
 func (d *dummyLogger) Warn(ctx context.Context, msg string, fields ...logging.Field)  {}
 func (d *dummyLogger) Error(ctx context.Context, msg string, fields ...logging.Field) {}
-func (d *dummyLogger) Sync() error                                                 { return nil }
+func (d *dummyLogger) Sync() error                                                    { return nil }
 
 func setupTestDB(t *testing.T) (*sql.DB, func()) {
 	db, err := sql.Open("sqlite", ":memory:")

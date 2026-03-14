@@ -1,0 +1,18 @@
+[Unit]
+Description=Aether Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aether/current
+EnvironmentFile=-/etc/aether/aether-runtime.env
+ExecStart=/opt/aether/current/bin/aetherd
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

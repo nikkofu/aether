@@ -44,7 +44,7 @@ func (a *Adapter) Execute(ctx context.Context, prompt string) (string, error) {
 			"temperature": a.config.Temperature,
 		},
 	}
-	
+
 	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/api/generate", a.config.BaseURL), bytes.NewBuffer(body))
 	if err != nil {
@@ -75,19 +75,23 @@ func (a *Adapter) Execute(ctx context.Context, prompt string) (string, error) {
 // Stream 发送请求并流式返回结果。
 func (a *Adapter) Stream(ctx context.Context, prompt string, onToken llm.TokenCallback) error {
 	reqBody := map[string]any{
-		"model":  a.config.Model,
-		"prompt": prompt,
-		"stream": true,
+		"model":   a.config.Model,
+		"prompt":  prompt,
+		"stream":  true,
 		"options": map[string]any{"temperature": a.config.Temperature},
 	}
-	
+
 	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/api/generate", a.config.BaseURL), bytes.NewBuffer(body))
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -102,14 +106,18 @@ func (a *Adapter) Stream(ctx context.Context, prompt string, onToken llm.TokenCa
 			Done     bool   `json:"done"`
 		}
 		if err := decoder.Decode(&chunk); err != nil {
-			if err.Error() == "EOF" { break }
+			if err.Error() == "EOF" {
+				break
+			}
 			return err
 		}
 
 		if chunk.Response != "" && onToken != nil {
 			onToken(chunk.Response)
 		}
-		if chunk.Done { break }
+		if chunk.Done {
+			break
+		}
 	}
 	return nil
 }

@@ -63,7 +63,6 @@ func (p *DefaultPolicy) Evaluate(ctx context.Context, evalCtx EvaluationContext)
 
 	skillLower := strings.ToLower(evalCtx.Skill)
 
-
 	// 规则 2: Shell 注入风险高，默认拒绝
 	if strings.Contains(skillLower, "shell") {
 		return DecisionDeny, nil

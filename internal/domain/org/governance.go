@@ -20,9 +20,9 @@ func NewGovernanceAgent(id string) *GovernanceAgent {
 	}
 }
 
-func (a *GovernanceAgent) ID() string           { return a.Name() }
-func (a *GovernanceAgent) Level() OrgLevel      { return LevelGovernance }
-func (a *GovernanceAgent) Supervisor() string    { return "vision_board" }
+func (a *GovernanceAgent) ID() string             { return a.Name() }
+func (a *GovernanceAgent) Level() OrgLevel        { return LevelGovernance }
+func (a *GovernanceAgent) Supervisor() string     { return "vision_board" }
 func (a *GovernanceAgent) Subordinates() []string { return a.subs }
 
 func (a *GovernanceAgent) Handle(ctx context.Context, msg agent.Message) ([]agent.Message, error) {
@@ -32,7 +32,7 @@ func (a *GovernanceAgent) Handle(ctx context.Context, msg agent.Message) ([]agen
 		}
 
 		ref, ok := msg.Payload["reflection"].(*reflection.Reflection)
-		if !ok {
+		if !ok || ref == nil {
 			return nil, nil
 		}
 

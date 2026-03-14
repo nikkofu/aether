@@ -31,9 +31,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 func (h *Handler) sendError(w http.ResponseWriter, r *http.Request, status int, code, message string, err error) {
 	requestID := uuid.New().String()
-	
+
 	if err != nil {
-		h.logger.Error(r.Context(), "API Error", 
+		h.logger.Error(r.Context(), "API Error",
 			logging.String("code", code),
 			logging.String("message", message),
 			logging.String("request_id", requestID),
@@ -220,4 +220,3 @@ func (h *Handler) deleteTodo(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-

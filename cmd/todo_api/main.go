@@ -6,9 +6,9 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/nikkofu/aether/internal/delivery/todo"
 	"github.com/nikkofu/aether/pkg/config"
 	"github.com/nikkofu/aether/pkg/logging"
-	"github.com/nikkofu/aether/internal/delivery/todo"
 	_ "modernc.org/sqlite"
 )
 
@@ -52,7 +52,7 @@ func main() {
 
 	// 6. 设置路由
 	mux := http.NewServeMux()
-	
+
 	// CORS 中间件
 	withCORS := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

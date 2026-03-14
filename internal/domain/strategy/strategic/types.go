@@ -3,6 +3,8 @@ package strategic
 import (
 	"context"
 	"time"
+
+	taskdomain "github.com/nikkofu/aether/internal/domain/task"
 )
 
 // Vision 代表系统的长期宏观愿景。
@@ -51,4 +53,18 @@ type StrategicPlanner interface {
 	PlanMilestones(ctx context.Context, goal Goal) ([]Milestone, error)
 	// Replan 基于执行反馈动态调整目标的执行路径。
 	Replan(ctx context.Context, goal Goal, feedback string) ([]Milestone, error)
+}
+
+// TaskLaunchRequest 表示战略引擎向标准任务控制面提交的执行请求。
+type TaskLaunchRequest struct {
+	Description     string
+	OrgID           string
+	WorkflowPattern taskdomain.WorkflowPattern
+	Input           map[string]any
+	TraceID         string
+}
+
+// TaskLauncher 抽象了战略引擎触发标准任务的能力，避免直接依赖具体 use case。
+type TaskLauncher interface {
+	LaunchTask(ctx context.Context, req TaskLaunchRequest) error
 }

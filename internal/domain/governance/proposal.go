@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nikkofu/aether/pkg/audit"
 	"github.com/nikkofu/aether/internal/domain/economy"
 	"github.com/nikkofu/aether/internal/domain/governance/constitution"
 	"github.com/nikkofu/aether/internal/domain/policy"
+	"github.com/nikkofu/aether/pkg/audit"
 	"github.com/nikkofu/aether/pkg/logging"
 	"github.com/nikkofu/aether/pkg/security/rbac"
 )
@@ -68,11 +68,15 @@ func (b *GovernanceBoard) SubmitProposal(ctx context.Context, p *PolicyProposal)
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if p.CreatedAt.IsZero() { p.CreatedAt = time.Now() }
-	if p.Votes == nil { p.Votes = make(map[string]bool) }
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = time.Now()
+	}
+	if p.Votes == nil {
+		p.Votes = make(map[string]bool)
+	}
 	p.Status = "pending"
 	b.proposals[p.ID] = p
-	
+
 	b.audit.Log(ctx, p.OrgID, audit.EventProposalCreated, p.Title, map[string]any{"id": p.ID, "creator": p.CreatorID})
 	return nil
 }
@@ -81,7 +85,9 @@ func (b *GovernanceBoard) Vote(ctx context.Context, proposalID, agentID string, 
 	b.mu.RLock()
 	p, ok := b.proposals[proposalID]
 	b.mu.RUnlock()
-	if !ok { return fmt.Errorf("proposal not found") }
+	if !ok {
+		return fmt.Errorf("proposal not found")
+	}
 
 	if !b.rbac.CheckPermission(agentID, rbac.PermVoteProposal, p.OrgID) {
 		return fmt.Errorf("unauthorized to vote")
@@ -90,7 +96,7 @@ func (b *GovernanceBoard) Vote(ctx context.Context, proposalID, agentID string, 
 	b.mu.Lock()
 	p.Votes[agentID] = approve
 	b.mu.Unlock()
-	
+
 	b.audit.Log(ctx, p.OrgID, audit.EventProposalVoted, "提案投票", map[string]any{"proposal": proposalID, "voter": agentID, "approve": approve})
 	return nil
 }
@@ -99,7 +105,9 @@ func (b *GovernanceBoard) ApproveByVision(proposalID string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	p, ok := b.proposals[proposalID]
-	if !ok { return fmt.Errorf("proposal not found") }
+	if !ok {
+		return fmt.Errorf("proposal not found")
+	}
 	p.VisionApproved = true
 	return nil
 }
@@ -108,7 +116,9 @@ func (b *GovernanceBoard) Tally(ctx context.Context, proposalID string) (bool, e
 	b.mu.Lock()
 	p, ok := b.proposals[proposalID]
 	b.mu.Unlock()
-	if !ok { return false, fmt.Errorf("proposal not found") }
+	if !ok {
+		return false, fmt.Errorf("proposal not found")
+	}
 
 	if p.RequiresVisionApproval && !p.VisionApproved {
 		return false, fmt.Errorf("requires vision layer approval")
@@ -117,14 +127,22 @@ func (b *GovernanceBoard) Tally(ctx context.Context, proposalID string) (bool, e
 	var totalWeight, approvedWeight float64
 	for agentID, approve := range p.Votes {
 		acc, err := b.ledger.GetAccount(ctx, p.OrgID, agentID)
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 		weight := acc.Reputation
-		if weight <= 0 { weight = 1.0 }
+		if weight <= 0 {
+			weight = 1.0
+		}
 		totalWeight += weight
-		if approve { approvedWeight += weight }
+		if approve {
+			approvedWeight += weight
+		}
 	}
 
-	if totalWeight == 0 { return false, nil }
+	if totalWeight == 0 {
+		return false, nil
+	}
 	passed := (approvedWeight / totalWeight) > 0.51
 
 	if !passed {
@@ -166,7 +184,9 @@ func (b *GovernanceBoard) ListProposals(orgID string) []*PolicyProposal {
 	defer b.mu.RUnlock()
 	var res []*PolicyProposal
 	for _, p := range b.proposals {
-		if orgID == "" || p.OrgID == orgID { res = append(res, p) }
+		if orgID == "" || p.OrgID == orgID {
+			res = append(res, p)
+		}
 	}
 	return res
 }

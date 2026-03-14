@@ -1,10 +1,11 @@
 package learning
 
 import (
+	"strings"
 	"time"
 
-	"github.com/nikkofu/aether/internal/usecase/reflection"
 	"github.com/nikkofu/aether/internal/domain/strategy"
+	"github.com/nikkofu/aether/internal/usecase/reflection"
 )
 
 // LearningEngine 负责基于反思结果更新代理策略。
@@ -27,9 +28,12 @@ func (l *LearningEngine) UpdateStrategy(r *reflection.Reflection) error {
 			RetryLimit: 3,
 		}
 	}
+	if s.RetryLimit <= 0 {
+		s.RetryLimit = 3
+	}
 
 	// 1. 故障处理：增加重试上限
-	if !r.Success {
+	if !r.Success && s.RetryLimit < 6 {
 		s.RetryLimit++
 	}
 
@@ -43,11 +47,33 @@ func (l *LearningEngine) UpdateStrategy(r *reflection.Reflection) error {
 		s.RoutingHint = "fast"
 	}
 
-	// 4. 学习总结：提取建议作为 Prompt 提示 (简单示例)
-	if len(r.Suggestions) > 0 {
-		s.PromptHint = r.Suggestions[0]
+	// 4. 学习总结：保留前两条高价值建议作为稳定提示
+	for _, suggestion := range r.Suggestions {
+		s.PromptHint = mergePromptHint(s.PromptHint, suggestion)
+		if len(strings.Split(s.PromptHint, " | ")) >= 2 {
+			break
+		}
 	}
 
 	s.UpdatedAt = time.Now()
 	return l.strategyStore.Save(s)
+}
+
+func mergePromptHint(existing, next string) string {
+	existing = strings.TrimSpace(existing)
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return existing
+	}
+	if existing == "" {
+		return next
+	}
+
+	parts := strings.Split(existing, " | ")
+	parts = append(parts, next)
+	parts = dedupeStrings(parts)
+	if len(parts) > 2 {
+		parts = parts[len(parts)-2:]
+	}
+	return strings.Join(parts, " | ")
 }

@@ -78,7 +78,7 @@ func main() {
 
 	port := os.Getenv("AETHERD_PORT")
 	if port == "" {
-		port = "8080"
+		port = "8090"
 	}
 
 	server := &http.Server{

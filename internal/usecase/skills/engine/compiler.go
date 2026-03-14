@@ -44,7 +44,7 @@ func (c *PolyglotCompiler) Compile(ctx context.Context, sourceCode, sourceLang, 
 		if c.logger != nil {
 			c.logger.Info(ctx, "正在使用 LLM 将代码转换为 WASI Go", logging.String("from", sourceLang))
 		}
-		
+
 		prompt := fmt.Sprintf("将以下 %s 代码重写为符合 wazero 和 WASI snapshot_preview1 标准的 Go 代码。\n"+
 			"要求：\n"+
 			"1. 必须使用 package main 和 func main()。\n"+
@@ -54,7 +54,7 @@ func (c *PolyglotCompiler) Compile(ctx context.Context, sourceCode, sourceLang, 
 			"源代码：\n%s", sourceLang, sourceCode)
 
 		input := map[string]any{
-			"prompt": prompt,
+			"prompt":     prompt,
 			"agent_name": "compiler_agent",
 		}
 
@@ -80,7 +80,7 @@ func (c *PolyglotCompiler) Compile(ctx context.Context, sourceCode, sourceLang, 
 
 	// 3. 执行系统级编译 (GOOS=wasip1 GOARCH=wasm)
 	targetWasmFile := filepath.Join(c.cacheDir, fmt.Sprintf("%s_%d.wasm", skillName, time.Now().Unix()))
-	
+
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", targetWasmFile, "main.go")
 	cmd.Dir = buildDir
 	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm", "CGO_ENABLED=0")

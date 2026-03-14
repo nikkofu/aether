@@ -48,7 +48,7 @@ func (s *SQLiteStore) Save(ctx context.Context, r *Reflection) error {
 
 	query := `INSERT INTO reflections (id, agent_name, task_id, success, duration_ms, cost, error_message, analysis, suggestions, confidence_score, created_at)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	
+
 	_, err := s.db.ExecContext(ctx, query,
 		r.ID, r.AgentName, r.TaskID, r.Success, r.Duration.Milliseconds(),
 		r.Cost, r.ErrorMessage, r.Analysis, string(suggestionsJSON), r.ConfidenceScore, r.CreatedAt,
@@ -60,7 +60,7 @@ func (s *SQLiteStore) Save(ctx context.Context, r *Reflection) error {
 func (s *SQLiteStore) ListRecent(ctx context.Context, limit int) ([]Reflection, error) {
 	query := `SELECT id, agent_name, task_id, success, duration_ms, cost, error_message, analysis, suggestions, confidence_score, created_at 
 	FROM reflections ORDER BY created_at DESC LIMIT ?`
-	
+
 	rows, err := s.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil, err
@@ -72,12 +72,12 @@ func (s *SQLiteStore) ListRecent(ctx context.Context, limit int) ([]Reflection, 
 		var r Reflection
 		var durMs int64
 		var suggestionsJSON string
-		
+
 		err := rows.Scan(&r.ID, &r.AgentName, &r.TaskID, &r.Success, &durMs, &r.Cost, &r.ErrorMessage, &r.Analysis, &suggestionsJSON, &r.ConfidenceScore, &r.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		r.Duration = time.Duration(durMs) * time.Millisecond
 		json.Unmarshal([]byte(suggestionsJSON), &r.Suggestions)
 		results = append(results, r)

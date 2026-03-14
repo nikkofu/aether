@@ -39,7 +39,7 @@ func (e *DefaultStrategyEngine) Evolve(ctx context.Context, skillID string) (*do
 	// 1. 获取最近的执行失败或性能指标
 	// 2. 调用 LLMSkill 进行反思并生成优化建议
 	// 3. 生成新的 SkillVersion 代码或配置
-	
+
 	// 模拟演进成功
 	v := &domain_skills.SkillVersion{
 		SkillID:    skillID,

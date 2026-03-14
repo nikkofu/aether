@@ -35,7 +35,7 @@ func (s *SQLiteStrategyStore) init(ctx context.Context) error {
 func (s *SQLiteStrategyStore) Get(agentName string) (*Strategy, error) {
 	query := `SELECT agent_name, prompt_hint, retry_limit, routing_hint, updated_at FROM strategies WHERE agent_name = ?`
 	row := s.db.QueryRow(query, agentName)
-	
+
 	var st Strategy
 	err := row.Scan(&st.AgentName, &st.PromptHint, &st.RetryLimit, &st.RoutingHint, &st.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -52,7 +52,7 @@ func (s *SQLiteStrategyStore) Save(st *Strategy) error {
 		retry_limit=excluded.retry_limit,
 		routing_hint=excluded.routing_hint,
 		updated_at=excluded.updated_at`
-	
+
 	_, err := s.db.Exec(query, st.AgentName, st.PromptHint, st.RetryLimit, st.RoutingHint, st.UpdatedAt)
 	return err
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/nikkofu/aether/internal/core/memory"
@@ -61,6 +62,7 @@ import (
 type Runtime struct {
 	cfg              *config.Config
 	db               *sql.DB
+	otelShutdown     func(context.Context) error
 	adapterMap       map[string]llm.Adapter
 	registry         *capability.CapabilityRegistry
 	policy           policy.Policy
@@ -105,6 +107,11 @@ type Runtime struct {
 	capabilityGateway capabilities.Gateway
 	wasmExecutor      *skill_sandbox.WASMExecutor
 	compiler          *engine.PolyglotCompiler
+
+	agentInitMu             sync.Mutex
+	orgAgentsInitialized    bool
+	issueWatcherInitialized bool
+	backgroundStartOnce     sync.Once
 }
 
 func (r *Runtime) GetAdapter(name string) (llm.Adapter, bool) {
@@ -160,18 +167,23 @@ func NewRuntime(cfg *config.Config) *Runtime {
 
 func NewDefaultRuntime(cfg *config.Config) *Runtime {
 	// 初始化 OTEL (Jaeger)
-	if _, err := otel.InitTracer("aether-core"); err != nil {
+	shutdown, err := otel.InitTracer("aether-core")
+	if err != nil {
 		fmt.Printf("警告: 无法初始化 OTEL 追踪器: %v\n", err)
 	}
 
 	r := NewRuntime(cfg)
+	r.otelShutdown = shutdown
 	if db, err := sql.Open("sqlite", cfg.Runtime.DatabasePath); err == nil {
 		db.SetMaxOpenConns(1)
 		r.db = db
 
 		// 初始化 Trace 存储和引擎
-		traceStorage, _ := trace.NewSQLiteTraceStorage(cfg.Runtime.DatabasePath)
+		traceStorage, _ := trace.NewSQLiteTraceStorageWithDB(db)
 		r.traceEngine = trace.NewTraceEngine(traceStorage)
+		if consoleTracer, ok := r.tracer.(*observability.ConsoleRenderer); ok {
+			consoleTracer.SetTraceStorage(traceStorage)
+		}
 
 		r.memory, _ = memory.NewSQLiteStoreWithDB(db)
 		r.tracker, _ = metrics.NewSQLiteTracker(db)
@@ -182,7 +194,11 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 		r.strategicStore, _ = strategic.NewSQLiteStore(db)
 		r.knowledgeGraph, _ = knowledge.NewSQLiteGraph(db)
 		r.taskStore, _ = taskdomain.NewSQLiteStore(db)
-		r.ledger, _ = economy.NewSQLiteLedger(db)
+		if ledger, err := economy.NewSQLiteLedger(db); err == nil {
+			r.ledger = ledger
+		} else if r.logger != nil {
+			r.logger.Warn(context.Background(), "ledger initialization failed", logging.Err(err))
+		}
 		r.constitution, _ = constitution.NewSQLiteConstitution(db)
 		r.audit, _ = audit.NewSQLiteLogger(db)
 		r.rbac, _ = rbac.NewSQLiteRBAC(db)
@@ -235,6 +251,9 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 
 	r.strategyEngine = evolution.NewDefaultStrategyEngine(llmSkill, r.knowledgeGraph, r.logger, r.evolutionGuard)
 	r.reflector = reflection.NewLLMReflector(llmSkill)
+	if r.taskService != nil {
+		r.taskService.SetTerminalTaskObserver(learning.NewTaskOutcomeObserver(r.reflectionStore, r.learningEngine, r.knowledgeGraph, r.logger))
+	}
 	r.strategicPlanner = strategic.NewLLMStrategicPlanner(llmSkill, r.knowledgeGraph, r.strategyEngine, r.logger)
 
 	skillEngine, _ := skill_registry.NewSQLiteSkillEngine(r.db, r.wasmExecutor, "./data/wasm_cache")
@@ -244,43 +263,16 @@ func NewDefaultRuntime(cfg *config.Config) *Runtime {
 	dm.SetLearning(r.reflector, r.reflectionStore, r.learningEngine)
 	dm.SetScheduler(r.scheduler)
 	dm.RegisterRole("operational", func(ctx context.Context, name string, payload map[string]any) (agent.Agent, error) {
-
-		return org.NewOperationalWorkerAgent(name, "tactical_manager", llmSkill, r.reflector, r.ledger, r.wasmExecutor, r.traceEngine), nil
+		supervisor := "tactical_manager"
+		if value, ok := payload["supervisor"].(string); ok && value != "" {
+			supervisor = value
+		}
+		return org.NewOperationalWorkerAgent(name, supervisor, llmSkill, r.reflector, r.ledger, r.wasmExecutor, r.traceEngine), nil
 	})
 	r.agentManager = dm
-	r.strategicEngine = strategic.NewEngine(r.strategicPlanner, r.strategicStore, r.agentManager, r.bus, r.logger, r.traceEngine)
+	r.strategicEngine = strategic.NewEngine(r.strategicPlanner, r.strategicStore, r.logger, &strategicTaskLauncher{tasks: r.taskService})
 
 	return r
-}
-
-func (r *Runtime) initSystemAgents() {
-	supervisor := agent.NewSupervisorAgent("supervisor", r.tracer, r.logger)
-	supervisor.SetGraph(r.knowledgeGraph)
-	r.agentManager.Register(supervisor)
-	r.bus.Subscribe(supervisor)
-
-	// 预注册核心协作团队
-	llm, _ := r.registry.Get("llm")
-
-	planner := agent.NewPlannerAgent("planner", llm, r.tracer)
-	planner.SetGraph(r.knowledgeGraph)
-	r.agentManager.Register(planner)
-	r.bus.Subscribe(planner)
-
-	coder := agent.NewCoderAgent("coder", llm, r.tracer)
-	r.agentManager.Register(coder)
-	r.bus.Subscribe(coder)
-
-	reviewer := agent.NewReviewerAgent("reviewer", llm, r.tracer)
-	r.agentManager.Register(reviewer)
-	r.bus.Subscribe(reviewer)
-
-	sentinel := agent.NewSentinelAgent("sentinel", agent.SentinelConfig{MaxDurationThreshold: 30 * time.Second, CostBudget: 1.0}, r.logger)
-	r.agentManager.Register(sentinel)
-	r.bus.Subscribe(sentinel)
-
-	issueWatcher := &issueWatcherAgent{BaseAgent: *agent.NewBaseAgent("issue_handler", "system-watcher"), handler: r.issueHandler, graph: r.knowledgeGraph}
-	r.bus.Subscribe(issueWatcher)
 }
 
 type issueWatcherAgent struct {
@@ -343,20 +335,27 @@ func (r *Runtime) RegisterAdapter(a llm.Adapter) {
 }
 
 func (r *Runtime) StartAgents(ctx context.Context) {
-	fmt.Fprintf(os.Stderr, "\033[1;35m⚙️  正在唤醒智能体集群...\033[0m")
+	r.StartAgentsForPatterns(ctx, taskdomain.PatternSequential, taskdomain.PatternParallel, taskdomain.PatternLoop, taskdomain.PatternCoordinator, taskdomain.PatternHierarchical, taskdomain.PatternReviewCritique, taskdomain.PatternIterativeRefinement)
+}
 
-	// 1. 系统角色同步注册
-	r.initSystemAgents()
-	r.initOrgAgents()
-
-	if r.sysScheduler != nil {
-		go r.sysScheduler.Start(ctx)
+func (r *Runtime) StartAgentsForPatterns(ctx context.Context, patterns ...taskdomain.WorkflowPattern) {
+	r.ensureCoreAgentsForPatterns(patterns...)
+	if needsOrgAgents(patterns...) {
+		r.ensureOrgAgents()
 	}
 
-	// 2. 异步启动总线消费循环
-	go r.bus.Start(ctx)
+	r.backgroundStartOnce.Do(func() {
+		fmt.Fprintf(os.Stderr, "\033[1;35m⚙️  正在唤醒智能体集群...\033[0m")
 
-	fmt.Fprintf(os.Stderr, " \033[1;32m[OK]\033[0m\n\033[1;32m🚀 集群已完全就绪，开始处理任务。\033[0m\n")
+		if r.sysScheduler != nil {
+			go r.sysScheduler.Start(ctx)
+		}
+
+		// 2. 异步启动总线消费循环
+		go r.bus.Start(ctx)
+
+		fmt.Fprintf(os.Stderr, " \033[1;32m[OK]\033[0m\n\033[1;32m🚀 集群已完全就绪，开始处理任务。\033[0m\n")
+	})
 }
 func (r *Runtime) GetBus() bus.Bus                  { return r.bus }
 func (r *Runtime) AgentManager() agent.AgentManager { return r.agentManager }
@@ -375,13 +374,193 @@ func (r *Runtime) NewPipelineExecutor(workers int) *dag.PipelineExecutor {
 }
 func (r *Runtime) GetRegistry() *capability.CapabilityRegistry { return r.registry }
 func (r *Runtime) Close() error {
-	if r.db != nil {
-		return r.db.Close()
+	var closeErr error
+	if r.otelShutdown != nil {
+		if err := r.otelShutdown(context.Background()); err != nil {
+			closeErr = err
+		}
 	}
-	return nil
+	if r.db != nil {
+		if err := r.db.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	return closeErr
 }
 
 var _ skills.AdapterProvider = (*Runtime)(nil)
+
+func (r *Runtime) ensureCoreAgentsForPatterns(patterns ...taskdomain.WorkflowPattern) {
+	llm, _ := r.registry.Get("llm")
+
+	r.ensureAgentRegistered("supervisor", func() agent.Agent {
+		supervisor := agent.NewSupervisorAgent("supervisor", r.tracer, r.logger)
+		supervisor.SetGraph(r.knowledgeGraph)
+		return supervisor
+	})
+
+	needPlanner := true
+	needParallelWorkflow := false
+	needCoordinatorWorkflow := true
+	needHierarchicalWorkflow := false
+	needLoopWorkflow := false
+	needSequentialWorkflow := true
+	needReviewCritiqueWorkflow := false
+	needIterativeRefinementWorkflow := false
+
+	if len(patterns) > 0 {
+		needPlanner = false
+		needParallelWorkflow = false
+		needCoordinatorWorkflow = false
+		needHierarchicalWorkflow = false
+		needLoopWorkflow = false
+		needSequentialWorkflow = false
+		needIterativeRefinementWorkflow = false
+		for _, pattern := range patterns {
+			switch taskdomain.NormalizeWorkflowPattern(pattern) {
+			case taskdomain.PatternParallel:
+				needParallelWorkflow = true
+			case taskdomain.PatternCoordinator:
+				needCoordinatorWorkflow = true
+			case taskdomain.PatternHierarchical:
+				needHierarchicalWorkflow = true
+			case taskdomain.PatternLoop:
+				needLoopWorkflow = true
+			case taskdomain.PatternIterativeRefinement:
+				needIterativeRefinementWorkflow = true
+			case taskdomain.PatternReviewCritique:
+				needReviewCritiqueWorkflow = true
+			case taskdomain.PatternSequential:
+				needPlanner = true
+				needSequentialWorkflow = true
+			default:
+				needPlanner = true
+			}
+		}
+	}
+
+	if needPlanner {
+		r.ensureAgentRegistered("planner", func() agent.Agent {
+			planner := agent.NewPlannerAgent("planner", llm, r.tracer)
+			planner.SetGraph(r.knowledgeGraph)
+			return planner
+		})
+	}
+
+	r.ensureAgentRegistered("coder", func() agent.Agent {
+		return agent.NewCoderAgent("coder", llm, r.tracer)
+	})
+
+	r.ensureAgentRegistered("reviewer", func() agent.Agent {
+		return agent.NewReviewerAgent("reviewer", llm, r.tracer)
+	})
+
+	if needReviewCritiqueWorkflow {
+		r.ensureAgentRegistered(agent.ReviewCritiqueWorkflowAgentName, func() agent.Agent {
+			return agent.NewReviewCritiqueWorkflowAgent(agent.ReviewCritiqueWorkflowAgentName)
+		})
+	}
+
+	if needIterativeRefinementWorkflow {
+		r.ensureAgentRegistered(agent.IterativeRefinementWorkflowAgentName, func() agent.Agent {
+			return agent.NewIterativeRefinementWorkflowAgent(agent.IterativeRefinementWorkflowAgentName)
+		})
+	}
+
+	if needLoopWorkflow {
+		r.ensureAgentRegistered(agent.LoopWorkflowAgentName, func() agent.Agent {
+			return agent.NewLoopWorkflowAgent(agent.LoopWorkflowAgentName)
+		})
+	}
+
+	if needParallelWorkflow {
+		r.ensureAgentRegistered(agent.ParallelWorkflowAgentName, func() agent.Agent {
+			return agent.NewParallelWorkflowAgent(agent.ParallelWorkflowAgentName, r.agentManager)
+		})
+	}
+
+	if needCoordinatorWorkflow {
+		r.ensureAgentRegistered(agent.CoordinatorWorkflowAgentName, func() agent.Agent {
+			return agent.NewCoordinatorWorkflowAgent(agent.CoordinatorWorkflowAgentName)
+		})
+	}
+
+	if needHierarchicalWorkflow {
+		r.ensureAgentRegistered(agent.HierarchicalWorkflowAgentName, func() agent.Agent {
+			return agent.NewHierarchicalWorkflowAgent(agent.HierarchicalWorkflowAgentName)
+		})
+	}
+
+	if needSequentialWorkflow {
+		r.ensureAgentRegistered(agent.SequentialWorkflowAgentName, func() agent.Agent {
+			return agent.NewSequentialWorkflowAgent(agent.SequentialWorkflowAgentName)
+		})
+	}
+
+	r.ensureAgentRegistered("sentinel", func() agent.Agent {
+		return agent.NewSentinelAgent("sentinel", agent.SentinelConfig{MaxDurationThreshold: 30 * time.Second, CostBudget: 1.0}, r.logger)
+	})
+
+	r.ensureIssueWatcher()
+}
+
+func (r *Runtime) ensureOrgAgents() {
+	r.agentInitMu.Lock()
+	defer r.agentInitMu.Unlock()
+
+	if r.orgAgentsInitialized {
+		return
+	}
+
+	r.initOrgAgents()
+	r.orgAgentsInitialized = true
+}
+
+func (r *Runtime) ensureAgentRegistered(name string, build func() agent.Agent) {
+	r.agentInitMu.Lock()
+	defer r.agentInitMu.Unlock()
+
+	if _, ok := r.agentManager.Get(name); ok {
+		return
+	}
+
+	instance := build()
+	if instance == nil {
+		return
+	}
+
+	r.agentManager.Register(instance)
+	r.bus.Subscribe(instance)
+}
+
+func (r *Runtime) ensureIssueWatcher() {
+	r.agentInitMu.Lock()
+	defer r.agentInitMu.Unlock()
+
+	if r.issueWatcherInitialized {
+		return
+	}
+
+	issueWatcher := &issueWatcherAgent{BaseAgent: *agent.NewBaseAgent("issue_handler", "system-watcher"), handler: r.issueHandler, graph: r.knowledgeGraph}
+	r.bus.Subscribe(issueWatcher)
+	r.issueWatcherInitialized = true
+}
+
+func needsOrgAgents(patterns ...taskdomain.WorkflowPattern) bool {
+	if len(patterns) == 0 {
+		return false
+	}
+
+	for _, pattern := range patterns {
+		switch taskdomain.NormalizeWorkflowPattern(pattern) {
+		case taskdomain.PatternCoordinator,
+			taskdomain.PatternHierarchical:
+			return true
+		}
+	}
+
+	return false
+}
 
 func (r *Runtime) initOrgAgents() {
 	vb := org.NewVisionBoardAgent("vision_board", r.strategicPlanner, r.logger)
@@ -438,9 +617,9 @@ func (r *Runtime) initLLM(cfg *config.Config) capability.Capability {
 	}
 
 	if defaultAdapter == nil {
-		// 终极修复：如果没有任何配置，默认使用你本地存在的 qwen3.5:0.8b
+		// 无配置时回退到本地可快速启动的轻量模型
 		defaultAdapter = ollama.NewOllamaAdapter(ollama.Config{
-			BaseURL: "http://localhost:11434", Model: "qwen3.5:0.8b",
+			BaseURL: "http://localhost:11434", Model: "gemma3:270m",
 			Temperature: 0.7, Timeout: 300 * time.Second,
 		})
 		r.RegisterAdapter(defaultAdapter)

@@ -124,18 +124,13 @@ func (b *MemoryBus) dispatch(ctx context.Context, msg agent.Message) {
 	}
 
 	for _, sub := range b.subscribers {
-		// 关键修复：支持广播与编排者监听，但增加“防止自循环”过滤
-		isOrchestrator := sub.Role() == "supervisor" || sub.Role() == "manager"
-
-		// 1. 如果消息是从自己发出的，跳过（防止死循环和噪音）
+		// 同一 Agent 发出的消息不再回投给自己，避免噪音和自循环。
 		if msg.From == sub.Name() {
 			continue
 		}
 
-		// 2. 编排者特权：监听非 UI 类消息（排除 token）
-		if isOrchestrator && msg.Type != "token" {
-			// 允许通过
-		} else if msg.To != "" && msg.To != sub.Name() {
+		// 总线只负责显式路由，不再在这里隐式授予编排特权。
+		if msg.To != "" && msg.To != sub.Name() {
 			continue
 		}
 

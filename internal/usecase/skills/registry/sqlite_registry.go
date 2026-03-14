@@ -25,15 +25,22 @@ type SQLiteSkillEngine struct {
 }
 
 func NewSQLiteSkillEngine(db *sql.DB, executor *sandbox.WASMExecutor, cacheDir string) (*SQLiteSkillEngine, error) {
-	if db == nil { return nil, fmt.Errorf("db required") }
-	if cacheDir == "" { cacheDir = "./data/wasm_cache" }
-	if err := os.MkdirAll(cacheDir, 0755); err != nil { return nil, err }
+	if db == nil {
+		return nil, fmt.Errorf("db required")
+	}
+	if cacheDir == "" {
+		cacheDir = "./data/wasm_cache"
+	}
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return nil, err
+	}
 
 	e := &SQLiteSkillEngine{db: db, executor: executor, cacheDir: cacheDir}
-	if err := e.init(context.Background()); err != nil { return nil, err }
+	if err := e.init(context.Background()); err != nil {
+		return nil, err
+	}
 	return e, nil
 }
-
 
 func (e *SQLiteSkillEngine) init(ctx context.Context) error {
 	queries := []string{
@@ -60,13 +67,17 @@ func (e *SQLiteSkillEngine) init(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_skill_versions_active ON skill_versions(skill_id, active);`,
 	}
 	for _, q := range queries {
-		if _, err := e.db.ExecContext(ctx, q); err != nil { return err }
+		if _, err := e.db.ExecContext(ctx, q); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func (e *SQLiteSkillEngine) Register(ctx context.Context, s domain_skills.Skill) error {
-	if s.CreatedAt.IsZero() { s.CreatedAt = time.Now() }
+	if s.CreatedAt.IsZero() {
+		s.CreatedAt = time.Now()
+	}
 	query := `INSERT INTO skills (id, name, description, created_by, active, created_at)
 	VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, active=excluded.active`
 	_, err := e.db.ExecContext(ctx, query, s.ID, s.Name, s.Description, s.CreatedBy, s.Active, s.CreatedAt)
@@ -74,7 +85,9 @@ func (e *SQLiteSkillEngine) Register(ctx context.Context, s domain_skills.Skill)
 }
 
 func (e *SQLiteSkillEngine) RegisterVersion(ctx context.Context, v domain_skills.SkillVersion) error {
-	if v.CreatedAt.IsZero() { v.CreatedAt = time.Now() }
+	if v.CreatedAt.IsZero() {
+		v.CreatedAt = time.Now()
+	}
 	query := `INSERT INTO skill_versions (skill_id, version, parent, code_path, entry_point, score, active, created_at)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 	_, err := e.db.ExecContext(ctx, query, v.SkillID, v.Version, v.Parent, v.CodePath, v.EntryPoint, v.Score, v.Active, v.CreatedAt)
@@ -83,23 +96,31 @@ func (e *SQLiteSkillEngine) RegisterVersion(ctx context.Context, v domain_skills
 
 func (e *SQLiteSkillEngine) ActivateVersion(ctx context.Context, skillID, version string) error {
 	tx, err := e.db.BeginTx(ctx, nil)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer tx.Rollback()
 
 	// 1. 禁用该技能的所有其他版本
 	_, err = tx.ExecContext(ctx, "UPDATE skill_versions SET active = 0 WHERE skill_id = ?", skillID)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	// 2. 激活目标版本
 	_, err = tx.ExecContext(ctx, "UPDATE skill_versions SET active = 1 WHERE skill_id = ? AND version = ?", skillID, version)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	return tx.Commit()
 }
 
 func (e *SQLiteSkillEngine) ListActive(ctx context.Context) ([]domain_skills.Skill, error) {
 	rows, err := e.db.QueryContext(ctx, "SELECT id, name, description, created_by, active, created_at FROM skills WHERE active = 1")
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 
 	var results []domain_skills.Skill
@@ -115,13 +136,17 @@ func (e *SQLiteSkillEngine) GetVersion(ctx context.Context, skillID, version str
 	row := e.db.QueryRowContext(ctx, "SELECT skill_id, version, parent, code_path, entry_point, score, active, created_at FROM skill_versions WHERE skill_id = ? AND version = ?", skillID, version)
 	var v domain_skills.SkillVersion
 	err := row.Scan(&v.SkillID, &v.Version, &v.Parent, &v.CodePath, &v.EntryPoint, &v.Score, &v.Active, &v.CreatedAt)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &v, nil
 }
 
 func (e *SQLiteSkillEngine) ListVersions(ctx context.Context, skillID string) ([]domain_skills.SkillVersion, error) {
 	rows, err := e.db.QueryContext(ctx, "SELECT skill_id, version, parent, code_path, entry_point, score, active, created_at FROM skill_versions WHERE skill_id = ? ORDER BY created_at DESC", skillID)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 
 	var results []domain_skills.SkillVersion
@@ -158,8 +183,12 @@ func (e *SQLiteSkillEngine) Execute(ctx context.Context, skillID string, input m
 	// 3. 准备执行上下文 (从 input 提取 org_id, user_id)
 	orgID, _ := input["org_id"].(string)
 	userID, _ := input["user_id"].(string)
-	if orgID == "" { orgID = "default" }
-	if userID == "" { userID = "system" }
+	if orgID == "" {
+		orgID = "default"
+	}
+	if userID == "" {
+		userID = "system"
+	}
 
 	inputData, _ := json.Marshal(input)
 
@@ -190,10 +219,14 @@ func (e *SQLiteSkillEngine) ensureLocalWASM(ctx context.Context, skillID, url st
 
 	// 下载文件
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -203,7 +236,9 @@ func (e *SQLiteSkillEngine) ensureLocalWASM(ctx context.Context, skillID, url st
 	// 写入临时文件后重命名，确保原子性
 	tmpPath := localPath + ".tmp"
 	f, err := os.Create(tmpPath)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer f.Close()
 
 	if _, err := io.Copy(f, resp.Body); err != nil {

@@ -1,0 +1,86 @@
+name: Aether-Release-Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_ci_release_gate:
+        description: Run the lightweight CI release gate before building the bundle
+        required: true
+        default: true
+        type: boolean
+      artifact_name:
+        description: Prefix for the uploaded release artifact
+        required: true
+        default: aether-release-bundle
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: Build Release Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web-ui/package-lock.json
+
+      - name: Install Web UI Dependencies
+        run: npm ci --prefix web-ui
+
+      - name: Read Release Version
+        id: version
+        run: echo "value=$(tr -d '[:space:]' < VERSION)" >> "${GITHUB_OUTPUT}"
+
+      - name: Run Lightweight CI Release Gate
+        if: ${{ inputs.run_ci_release_gate }}
+        env:
+          AETHER_RELEASE_GATE_SKIP_OLLAMA_CHECK: '1'
+          AETHER_RELEASE_GATE_SKIP_SMOKE: '1'
+        run: bash scripts/release_gate.sh
+
+      - name: Build Release Bundle
+        run: bash scripts/build_release_bundle.sh
+
+      - name: Preflight Built Bundle
+        env:
+          AETHER_PREFLIGHT_PLATFORM: systemd
+          AETHER_PREFLIGHT_BUNDLE_DIR: ${{ github.workspace }}/dist/release/v${{ steps.version.outputs.value }}
+          AETHER_PREFLIGHT_INSTALL_ROOT: ${{ runner.temp }}/aether
+          AETHER_PREFLIGHT_SYSTEMD_UNIT_DIR: ${{ runner.temp }}/systemd
+        run: bash scripts/preflight_local_env.sh
+
+      - name: Upload Release Bundle Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}-v${{ steps.version.outputs.value }}
+          path: dist/release/v${{ steps.version.outputs.value }}
+          if-no-files-found: error
+
+      - name: Publish Workflow Summary
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          {
+            echo "## Release Bundle"
+            echo
+            echo "- Version: \`v${RELEASE_VERSION}\`"
+            echo "- Bundle path: \`dist/release/v${RELEASE_VERSION}\`"
+            echo "- Installer: \`deployments/install_release.sh\`"
+            echo "- GitHub release runbook: \`deployments/GITHUB_RELEASE_RUNBOOK.md\`"
+            echo "- Handoff: \`deployments/DELIVERY_HANDOFF.md\`"
+            echo "- Preflight: \`scripts/preflight_local_env.sh\`"
+            echo "- Evidence collector: \`scripts/collect_release_evidence.sh\`"
+            echo "- Checklist: \`deployments/RELEASE_CHECKLIST.md\`"
+            echo "- Rollback SOP: \`deployments/ROLLBACK_SOP.md\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

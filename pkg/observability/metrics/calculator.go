@@ -1,10 +1,11 @@
 package metrics
 
 import (
-        "database/sql"
-        "sort"
-        "time"
+	"database/sql"
+	"sort"
+	"time"
 )
+
 type MetricsEngine struct {
 	db *sql.DB
 }
@@ -55,13 +56,17 @@ func (e *MetricsEngine) CalculateOrgMetrics(orgID string, since time.Time) (*Org
 	if len(durations) > 0 {
 		metrics.AverageTaskDurationMs = sum / float64(len(durations))
 		sort.Float64s(durations)
-		
+
 		p95Index := int(float64(len(durations)) * 0.95)
-		if p95Index >= len(durations) { p95Index = len(durations) - 1 }
+		if p95Index >= len(durations) {
+			p95Index = len(durations) - 1
+		}
 		metrics.P95TaskDurationMs = durations[p95Index]
 
 		p99Index := int(float64(len(durations)) * 0.99)
-		if p99Index >= len(durations) { p99Index = len(durations) - 1 }
+		if p99Index >= len(durations) {
+			p99Index = len(durations) - 1
+		}
 		metrics.P99TaskDurationMs = durations[p99Index]
 	}
 

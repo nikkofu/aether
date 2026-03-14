@@ -71,7 +71,7 @@ func main() {
 
 	// 3. 统计输出
 	fmt.Println("\n--- 压测结果 (执行 10000 次) ---")
-	
+
 	topAgents, _ := ledger.TopAgentsByReputation(ctx, orgID, 10)
 	fmt.Println("\n【Top 10 高信誉 Agent (优胜者)】")
 	for i, a := range topAgents {
@@ -84,11 +84,11 @@ func main() {
 		totalBalance += a.Balance
 		totalRep += a.Reputation
 	}
-	
+
 	fmt.Printf("\n【宏观经济指标】\n")
 	fmt.Printf("系统总发币量: $%6.2f\n", totalBalance)
 	fmt.Printf("系统总信誉值: %6.2f\n", totalRep)
-	
+
 	if len(topAgents) > 0 && topAgents[0].Balance > totalBalance*0.5 {
 		fmt.Println("状态: 出现严重寡头垄断！")
 	} else {
@@ -102,7 +102,9 @@ func selectAgentByReputation(ctx context.Context, ledger economy.Ledger, orgID s
 	for i, id := range ids {
 		acc, _ := ledger.GetAccount(ctx, orgID, id)
 		w := acc.Reputation
-		if w <= 0 { w = 0.1 }
+		if w <= 0 {
+			w = 0.1
+		}
 		weights[i] = w
 		totalWeight += w
 	}

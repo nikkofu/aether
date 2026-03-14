@@ -64,7 +64,7 @@ func (h *SkillHandler) runSkill(ctx context.Context, args []string) {
 	runCmd := flag.NewFlagSet("skill run", flag.ExitOnError)
 	inputJSON := runCmd.String("input", "{}", "技能输入的 JSON 字符串")
 	stream := runCmd.Bool("stream", false, "是否启用流式输出")
-	
+
 	// 在 Parse 之前处理 args，确保 flag 能够被正确解析，无论位置如何
 	// 但最标准的做法是让用户遵循 [flags] [args] 顺序
 	runCmd.Parse(args)
@@ -119,7 +119,7 @@ func (h *SkillHandler) compileSkill(ctx context.Context, args []string) {
 	compileCmd := flag.NewFlagSet("skill compile", flag.ExitOnError)
 	lang := compileCmd.String("lang", "python", "源代码的编程语言 (例如: python, js)")
 	name := compileCmd.String("name", "custom_skill", "生成的技能名称")
-	
+
 	compileCmd.Parse(args)
 	remaining := compileCmd.Args()
 
@@ -128,7 +128,7 @@ func (h *SkillHandler) compileSkill(ctx context.Context, args []string) {
 		compileCmd.Usage()
 		os.Exit(1)
 	}
-	
+
 	sourceFile := remaining[0]
 	codeBytes, err := os.ReadFile(sourceFile)
 	if err != nil {
@@ -144,7 +144,7 @@ func (h *SkillHandler) compileSkill(ctx context.Context, args []string) {
 
 	fmt.Fprintf(os.Stderr, "🚀 正在通过 LLM 将 %s 代码编译为 WASM...\n", *lang)
 	start := time.Now()
-	
+
 	wasmPath, err := compiler.Compile(ctx, string(codeBytes), *lang, *name)
 	if err != nil {
 		h.printErrorJSON(err)

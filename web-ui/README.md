@@ -26,10 +26,15 @@ npm install
 Start the dev server:
 
 ```bash
-VITE_AETHERD_URL=http://localhost:8080 npm run dev
+VITE_AETHERD_URL=http://localhost:8090 npm run dev
 ```
 
-If `VITE_AETHERD_URL` is not set, the app defaults to `http://localhost:8080`.
+If `VITE_AETHERD_URL` is not set, the app defaults to `http://localhost:8090`.
+
+Task submission notes:
+
+- choose one of the supported explicit workflow patterns from the task form
+- when using `parallel`, you can provide explicit branch `name/task` pairs; leaving every branch task empty falls back to the runtime's built-in default branches
 
 ## Production Build
 

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nikkofu/aether/internal/domain/capability"
+	"github.com/nikkofu/aether/internal/domain/strategy"
 	"github.com/nikkofu/aether/internal/infrastructure/llm"
 )
 
@@ -35,6 +37,22 @@ func (m *MockAdapter) Stream(ctx context.Context, prompt string, onToken llm.Tok
 	if m.StreamFunc != nil {
 		return m.StreamFunc(ctx, prompt, onToken)
 	}
+	return nil
+}
+
+type stubStrategyStore struct {
+	strategy *strategy.Strategy
+}
+
+func (s *stubStrategyStore) Get(agentName string) (*strategy.Strategy, error) {
+	if s.strategy == nil || s.strategy.AgentName != agentName {
+		return nil, errors.New("strategy not found")
+	}
+	return s.strategy, nil
+}
+
+func (s *stubStrategyStore) Save(st *strategy.Strategy) error {
+	s.strategy = st
 	return nil
 }
 
@@ -138,4 +156,43 @@ func TestLLMSkill_Execute_ErrorCase(t *testing.T) {
 			t.Fatal("期望渲染失败，但实际成功")
 		}
 	})
+}
+
+func TestLLMSkillInjectsLearnedOperatingRules(t *testing.T) {
+	var capturedPrompt string
+	mockAdapter := &MockAdapter{
+		StreamFunc: func(ctx context.Context, prompt string, onToken llm.TokenCallback) error {
+			capturedPrompt = prompt
+			onToken("ok")
+			return nil
+		},
+	}
+
+	strategyStore := &stubStrategyStore{
+		strategy: &strategy.Strategy{
+			AgentName:  "coder",
+			PromptHint: "Satisfy exact bullet prefixes in order before improving wording. | Return only the final deliverable with no preface, explanation, or meta commentary.",
+			RetryLimit: 1,
+			UpdatedAt:  time.Now(),
+		},
+	}
+
+	skill := NewLLMSkill("test-skill", mockAdapter, nil, nil, nil, nil, strategyStore, nil, "Default template", nil)
+	_, err := skill.Execute(context.Background(), map[string]any{
+		"agent_name": "coder",
+		"prompt":     "Write the deliverable.",
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if !strings.Contains(capturedPrompt, "Learned operating rules from previous task reflections:") {
+		t.Fatalf("expected learned rules prelude, got %q", capturedPrompt)
+	}
+	if !strings.Contains(capturedPrompt, "- Satisfy exact bullet prefixes in order before improving wording.") {
+		t.Fatalf("expected first learned rule bullet, got %q", capturedPrompt)
+	}
+	if !strings.Contains(capturedPrompt, "Apply these learned rules unless the current task explicitly conflicts with them.") {
+		t.Fatalf("expected learned rules footer, got %q", capturedPrompt)
+	}
 }

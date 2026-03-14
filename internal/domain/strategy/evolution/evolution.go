@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/nikkofu/aether/internal/domain/capability"
 	"github.com/nikkofu/aether/internal/domain/knowledge"
-	"github.com/nikkofu/aether/pkg/logging"
 	"github.com/nikkofu/aether/internal/domain/policy"
+	"github.com/nikkofu/aether/pkg/logging"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
@@ -41,14 +41,18 @@ func (e *DefaultStrategyEngine) Register(ctx context.Context, t StrategyTemplate
 
 func (e *DefaultStrategyEngine) Activate(ctx context.Context, id, version string) error {
 	for _, t := range e.templates {
-		if t.ID == id { t.Active = (t.Version == version) }
+		if t.ID == id {
+			t.Active = (t.Version == version)
+		}
 	}
 	return nil
 }
 
 func (e *DefaultStrategyEngine) GetActive(ctx context.Context, orgID string) (*StrategyTemplate, error) {
 	for _, t := range e.templates {
-		if t.Active { return t, nil }
+		if t.Active {
+			return t, nil
+		}
 	}
 	return &StrategyTemplate{
 		ID: "default", Content: "愿景: {{vision_title}}\n历史: {{history}}\n生成3个目标，输出JSON。", Active: true,
@@ -78,7 +82,9 @@ func (e *DefaultStrategyEngine) Evolve(ctx context.Context, orgID, templateID st
 	for _, r := range reflections {
 		if success, ok := r.Metadata["success"].(bool); ok && !success {
 			failures = append(failures, r.Name)
-			if len(failures) >= 5 { break }
+			if len(failures) >= 5 {
+				break
+			}
 		}
 	}
 
@@ -96,7 +102,9 @@ func (e *DefaultStrategyEngine) Evolve(ctx context.Context, orgID, templateID st
 3. 仅输出模板内容：`, current.Content, failures)
 
 	output, err := e.llm.Execute(ctx, map[string]any{"prompt": prompt})
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	newContent, _ := output["output"].(string)
 
 	// 4. 注册新版本
@@ -108,9 +116,9 @@ func (e *DefaultStrategyEngine) Evolve(ctx context.Context, orgID, templateID st
 
 	// 5. 激活
 	e.Activate(ctx, templateID, newV.Version)
-	
+
 	if e.logger != nil {
-		e.logger.Info(ctx, "战略进化完成：已热激活优化版决策模板", 
+		e.logger.Info(ctx, "战略进化完成：已热激活优化版决策模板",
 			logging.String("org", orgID),
 			logging.String("version", newV.Version))
 	}

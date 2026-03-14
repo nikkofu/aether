@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nikkofu/aether/internal/domain/agent"
+	taskdomain "github.com/nikkofu/aether/internal/domain/task"
 	"github.com/nikkofu/aether/pkg/logging"
-	"github.com/nikkofu/aether/pkg/observability/trace"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
@@ -17,21 +16,17 @@ import (
 type Engine struct {
 	planner      StrategicPlanner
 	store        Store
-	agentManager agent.AgentManager
-	bus          agent.Bus
 	logger       logging.Logger
-	tracer       *trace.TraceEngine
+	taskLauncher TaskLauncher
 }
 
 // NewEngine 创建一个新的战略执行引擎。
-func NewEngine(p StrategicPlanner, s Store, am agent.AgentManager, b agent.Bus, l logging.Logger, t *trace.TraceEngine) *Engine {
+func NewEngine(p StrategicPlanner, s Store, l logging.Logger, launcher TaskLauncher) *Engine {
 	return &Engine{
 		planner:      p,
 		store:        s,
-		agentManager: am,
-		bus:          b,
 		logger:       l,
-		tracer:       t,
+		taskLauncher: launcher,
 	}
 }
 
@@ -74,7 +69,7 @@ func (e *Engine) processGoal(ctx context.Context, goal Goal) {
 	// 如果没有里程碑，尝试规划
 	if len(milestones) == 0 {
 		e.logger.Info(ctx, "目标缺少里程碑，启动规划", logging.String("goal", goal.Title))
-		
+
 		// Tracing: strategic plan
 		tracer := otel.Tracer("aether-tracer")
 		var span oteltrace.Span
@@ -119,31 +114,46 @@ func (e *Engine) processGoal(ctx context.Context, goal Goal) {
 		return
 	}
 
-	// 4. 转换为任务并下发给 Agent
+	// 4. 转换为标准任务并下发给控制面
 	e.executeMilestone(ctx, goal, pending)
 }
 
 func (e *Engine) executeMilestone(ctx context.Context, goal Goal, ms *Milestone) {
 	e.logger.Info(ctx, "启动里程碑任务", logging.String("milestone", ms.Title))
-	
-	// 更新状态为执行中
-	e.store.UpdateMilestoneStatus(ms.ID, "active")
 
-	// 构造任务消息发给总线
-	msg := agent.Message{
-		From:      "strategic_engine",
-		To:        "supervisor",
-		Type:      "task",
-		Timestamp: time.Now(),
-		Payload: map[string]any{
-			"description": fmt.Sprintf("战略目标 [%s] 的子任务: %s", goal.Title, ms.Title),
-			"goal_id":     goal.ID,
-			"ms_id":       ms.ID,
+	if e.taskLauncher == nil {
+		e.logger.Error(ctx, "战略引擎缺少任务启动器，无法发起里程碑任务",
+			logging.String("goal_id", goal.ID),
+			logging.String("milestone_id", ms.ID),
+		)
+		return
+	}
+
+	req := TaskLaunchRequest{
+		Description:     fmt.Sprintf("战略目标 [%s] 的子任务: %s", goal.Title, ms.Title),
+		OrgID:           goal.OrgID,
+		WorkflowPattern: taskdomain.PatternCoordinator,
+		Input: map[string]any{
+			"goal_id":      goal.ID,
+			"milestone_id": ms.ID,
 		},
 	}
 
-	if e.bus != nil {
-		e.bus.Publish(ctx, msg)
+	if err := e.taskLauncher.LaunchTask(ctx, req); err != nil {
+		e.logger.Error(ctx, "里程碑任务下发失败",
+			logging.String("goal_id", goal.ID),
+			logging.String("milestone_id", ms.ID),
+			logging.Err(err),
+		)
+		return
+	}
+
+	// 仅在任务成功进入控制面后，才把里程碑标记为执行中。
+	if err := e.store.UpdateMilestoneStatus(ms.ID, "active"); err != nil {
+		e.logger.Error(ctx, "更新里程碑状态失败",
+			logging.String("milestone_id", ms.ID),
+			logging.Err(err),
+		)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"runtime/debug"
 	"strings"
 
@@ -70,6 +71,7 @@ func (b *BaseAgent) ProtectedHandle(ctx context.Context, msg Message, handler fu
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic in agent %s: %v", b.name, r)
+			fmt.Fprintf(os.Stderr, "panic in agent %s:\n%s\n", b.name, string(debug.Stack()))
 			if b.logger != nil {
 				b.logger.Error(ctx, "Agent 发生崩溃", logging.Any("panic", r), logging.String("stack", string(debug.Stack())))
 			}

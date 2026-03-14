@@ -39,11 +39,17 @@ func (r *DefaultRBAC) AssignRole(userID string, role Role, orgID string) error {
 func (r *DefaultRBAC) CheckPermission(userID string, perm Permission, orgID string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if r.assignments[orgID] == nil { return false }
+	if r.assignments[orgID] == nil {
+		return false
+	}
 	role, ok := r.assignments[orgID][userID]
-	if !ok { return false }
+	if !ok {
+		return false
+	}
 	for _, p := range r.permissions[role] {
-		if p == perm { return true }
+		if p == perm {
+			return true
+		}
 	}
 	return false
 }

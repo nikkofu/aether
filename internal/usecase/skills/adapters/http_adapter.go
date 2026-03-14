@@ -33,7 +33,9 @@ func (a *HTTPToolAdapter) ExecuteCall(ctx context.Context, orgID string, name st
 
 	inputBytes, _ := json.Marshal(input)
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(inputBytes))
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)

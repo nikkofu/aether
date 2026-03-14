@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/nikkofu/aether/pkg/audit"
 	"github.com/nikkofu/aether/internal/infrastructure/capabilities"
 	"github.com/nikkofu/aether/internal/infrastructure/capabilities/registry"
+	"github.com/nikkofu/aether/pkg/audit"
 	"github.com/nikkofu/aether/pkg/observability/trace"
 	"github.com/nikkofu/aether/pkg/security/rbac"
 	"go.opentelemetry.io/otel/attribute"
@@ -110,7 +110,9 @@ func (g *DefaultGateway) Execute(ctx context.Context, req capabilities.Capabilit
 
 	// 7. 审计日志 (After)
 	status := "success"
-	if err != nil || !resp.Success { status = "fail" }
+	if err != nil || !resp.Success {
+		status = "fail"
+	}
 	g.audit.Log(ctx, req.OrgID, audit.EventEconomyCharge, "能力调用结束", map[string]any{
 		"cap": req.Name, "status": status, "duration_ms": duration.Milliseconds(),
 	})
@@ -120,7 +122,9 @@ func (g *DefaultGateway) Execute(ctx context.Context, req capabilities.Capabilit
 
 func (g *DefaultGateway) logFailure(ctx context.Context, req capabilities.CapabilityRequest, msg string, err error) {
 	errStr := ""
-	if err != nil { errStr = err.Error() }
+	if err != nil {
+		errStr = err.Error()
+	}
 	g.audit.Log(ctx, req.OrgID, audit.EventConstRejected, "能力调用拦截", map[string]any{
 		"cap": req.Name, "reason": msg, "err": errStr, "skill": req.SkillID,
 	})

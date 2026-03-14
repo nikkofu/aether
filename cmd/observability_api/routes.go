@@ -11,7 +11,7 @@ import (
 	"github.com/nikkofu/aether/pkg/observability/trace"
 )
 
-func setupRoutes(engine *trace.TraceEngine, metricsEngine *metrics.MetricsEngine) *http.ServeMux {
+func setupRoutes(engine *trace.TraceEngine, metricsEngine *metrics.MetricsEngine, dbPath string) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// CORS handler wrapper
@@ -27,6 +27,18 @@ func setupRoutes(engine *trace.TraceEngine, metricsEngine *metrics.MetricsEngine
 			h(w, r)
 		}
 	}
+
+	mux.HandleFunc("/healthz", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":        "ok",
+			"database_path": dbPath,
+			"timestamp":     time.Now().UTC(),
+		})
+	}))
 
 	mux.HandleFunc("/trace/", withCORS(func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/trace/")

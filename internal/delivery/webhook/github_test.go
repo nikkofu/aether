@@ -66,6 +66,9 @@ func TestGitHubWebhookHandler_CreatesTask(t *testing.T) {
 	if submitter.lastInput.Mode != "agent" {
 		t.Fatalf("expected agent mode, got %s", submitter.lastInput.Mode)
 	}
+	if submitter.lastInput.WorkflowPattern != taskdomain.PatternSequential {
+		t.Fatalf("expected sequential pattern, got %s", submitter.lastInput.WorkflowPattern)
+	}
 	if submitter.lastInput.Description == "" {
 		t.Fatal("expected a generated task description")
 	}

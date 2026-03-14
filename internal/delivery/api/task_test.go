@@ -82,6 +82,9 @@ func TestTaskAPI(t *testing.T) {
 		if taskResp.Attempt != 1 {
 			t.Fatalf("expected attempt 1, got %d", taskResp.Attempt)
 		}
+		if taskResp.WorkflowPattern != taskdomain.PatternSequential {
+			t.Fatalf("expected sequential pattern, got %s", taskResp.WorkflowPattern)
+		}
 
 		taskID = taskResp.ID
 	})
@@ -214,4 +217,58 @@ func TestTaskAPI(t *testing.T) {
 			t.Fatalf("expected retry_of=%s, got %#v", taskID, taskResp.Input["retry_of"])
 		}
 	})
+}
+
+func TestTaskAPI_CreateParallelTask(t *testing.T) {
+	db, cleanup := setupTaskTestDB(t)
+	defer cleanup()
+
+	store, err := taskdomain.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+
+	b := bus.NewMemoryBus(100)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.Start(ctx)
+
+	service := taskusecase.NewService(store, b, &testLogger{})
+	service.StartObservers(context.Background())
+
+	handler := NewTaskHandler(service, &testLogger{})
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	body := []byte(`{"workflow_pattern":"parallel","description":"Run explicit branches","input":{"parallel_branches":[{"name":"Plan","task":"Analyze current state"},{"name":"Build","task":"Implement the change"},{"name":"Verify","task":"Write validation steps"}]}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d", w.Code)
+	}
+
+	var taskResp taskdomain.Task
+	if err := json.NewDecoder(w.Body).Decode(&taskResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if taskResp.WorkflowPattern != taskdomain.PatternParallel {
+		t.Fatalf("expected parallel pattern, got %s", taskResp.WorkflowPattern)
+	}
+	if taskResp.CurrentStage != "workflow.parallel" {
+		t.Fatalf("expected workflow.parallel stage, got %s", taskResp.CurrentStage)
+	}
+	branches, ok := taskResp.Input["parallel_branches"].([]any)
+	if !ok || len(branches) != 3 {
+		t.Fatalf("expected 3 parallel branches, got %#v", taskResp.Input["parallel_branches"])
+	}
+	firstBranch, ok := branches[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected object branch payload, got %#v", branches[0])
+	}
+	if firstBranch["name"] != "Plan" || firstBranch["task"] != "Analyze current state" {
+		t.Fatalf("unexpected first branch payload: %#v", firstBranch)
+	}
 }

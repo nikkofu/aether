@@ -2,15 +2,16 @@ package cluster
 
 import (
 	"context"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/nikkofu/aether/internal/domain/agent"
-	"github.com/nikkofu/aether/pkg/bus"
 	"github.com/nikkofu/aether/internal/domain/economy"
-	"github.com/nikkofu/aether/pkg/logging"
 	"github.com/nikkofu/aether/internal/domain/risk"
+	"github.com/nikkofu/aether/pkg/bus"
+	"github.com/nikkofu/aether/pkg/logging"
 )
 
 // Scheduler 负责管理工作节点并进行风险感知调度。
@@ -89,10 +90,10 @@ func (s *Scheduler) Start(ctx context.Context, b bus.Bus) {
 func (s *Scheduler) RegisterHeartbeat(role, workerID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	_, exists := s.lastSeen[workerID]
 	s.lastSeen[workerID] = time.Now()
-	
+
 	if !exists {
 		s.workers[role] = append(s.workers[role], workerID)
 		if s.logger != nil {
@@ -108,7 +109,9 @@ func (s *Scheduler) CheckTimeouts(timeout time.Duration) {
 	for role, ids := range s.workers {
 		var active []string
 		for _, id := range ids {
-			if now.Sub(s.lastSeen[id]) <= timeout { active = append(active, id) }
+			if now.Sub(s.lastSeen[id]) <= timeout {
+				active = append(active, id)
+			}
 		}
 		s.workers[role] = active
 	}
@@ -117,7 +120,7 @@ func (s *Scheduler) CheckTimeouts(timeout time.Duration) {
 // SelectWorker 增加风险熔断检查。
 func (s *Scheduler) SelectByBidding(ctx context.Context, b agent.Bus, role, taskID string, basePrice float64) string {
 	orgID := "default"
-	
+
 	// 1. 发布招标公告
 	if s.logger != nil {
 		s.logger.Info(ctx, "发布任务招标公告", logging.String("task_id", taskID), logging.String("role", role))
@@ -156,25 +159,34 @@ func (s *Scheduler) SelectByBidding(ctx context.Context, b agent.Bus, role, task
 	}
 	var candidates []candidate
 	for _, r := range records {
+		if ledgerIsNil(s.ledger) {
+			break
+		}
 		acc, err := s.ledger.GetAccount(ctx, orgID, r.workerID)
-		if err != nil { continue }
-		
+		if err != nil {
+			continue
+		}
+
 		// 归一化价格得分 (假设越低越好，最高 basePrice)
 		priceScore := (basePrice - r.price) / basePrice
-		if priceScore < 0 { priceScore = 0 }
-		
+		if priceScore < 0 {
+			priceScore = 0
+		}
+
 		// 最终得分 = 声望权重 + 价格权重
 		finalScore := (acc.Reputation * 0.6) + (priceScore * 0.4)
 		candidates = append(candidates, candidate{id: r.workerID, score: finalScore})
 	}
 
-	if len(candidates) == 0 { return s.SelectWorker(ctx, role) }
+	if len(candidates) == 0 {
+		return s.SelectWorker(ctx, role)
+	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
 
 	winnerID := candidates[0].id
 	if s.logger != nil {
-		s.logger.Info(ctx, "竞标结束，选出最优节点", 
-			logging.String("task_id", taskID), 
+		s.logger.Info(ctx, "竞标结束，选出最优节点",
+			logging.String("task_id", taskID),
 			logging.String("winner", winnerID),
 			logging.Int("bid_count", len(records)),
 		)
@@ -187,23 +199,25 @@ func (s *Scheduler) SelectWorker(ctx context.Context, role string) string {
 	orgID := "default"
 	// 这里可以扩展从 context 获取 orgID 的逻辑
 
+	s.mu.RLock()
+	ids := append([]string(nil), s.workers[role]...)
+	s.mu.RUnlock()
+
+	if len(ids) == 0 {
+		return "local"
+	}
+
 	// 1. 风险熔断检查
 	if s.guard != nil {
 		if err := s.guard.CheckSystemHealth(ctx, orgID); err != nil {
 			if s.logger != nil {
-				s.logger.Error(ctx, "调度被拒绝: 系统处于风险熔断状态", logging.Err(err))
+				s.logger.Warn(ctx, "远程调度降级为本地执行", logging.Err(err), logging.String("role", role))
 			}
-			return ""
+			return "local"
 		}
 	}
 
-	s.mu.RLock()
-	ids := s.workers[role]
-	s.mu.RUnlock()
-
-	if len(ids) == 0 { return "" }
-
-	if s.ledger == nil {
+	if ledgerIsNil(s.ledger) {
 		return s.roundRobin(role, ids)
 	}
 
@@ -214,21 +228,38 @@ func (s *Scheduler) SelectWorker(ctx context.Context, role string) string {
 	candidates := make([]candidate, 0, len(ids))
 	for _, id := range ids {
 		acc, err := s.ledger.GetAccount(ctx, orgID, id)
-		if err == nil && acc.Reputation >= 0 {
+		if err == nil && acc != nil && acc.Reputation >= 0 {
 			candidates = append(candidates, candidate{id: id, rep: acc.Reputation})
 		}
 	}
 
-	if len(candidates) == 0 { return "" }
+	if len(candidates) == 0 {
+		return s.roundRobin(role, ids)
+	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].rep > candidates[j].rep })
 	return candidates[0].id
+}
+
+func ledgerIsNil(ledger economy.Ledger) bool {
+	if ledger == nil {
+		return true
+	}
+	value := reflect.ValueOf(ledger)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func (s *Scheduler) roundRobin(role string, ids []string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	idx := s.lastIdx[role]
-	if idx >= len(ids) { idx = 0 }
+	if idx >= len(ids) {
+		idx = 0
+	}
 	selected := ids[idx]
 	s.lastIdx[role] = (idx + 1) % len(ids)
 	return selected

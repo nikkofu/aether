@@ -26,7 +26,9 @@ func (c *FileCapability) Execute(ctx context.Context, req capabilities.Capabilit
 	os.MkdirAll(orgRoot, 0755)
 
 	fileName, _ := req.Params["file"].(string)
-	if fileName == "" { return capabilities.CapabilityResponse{Success: false, Error: "missing file param"}, nil }
+	if fileName == "" {
+		return capabilities.CapabilityResponse{Success: false, Error: "missing file param"}, nil
+	}
 
 	// 禁止绝对路径和目录穿越
 	if strings.Contains(fileName, "..") || filepath.IsAbs(fileName) {
@@ -39,7 +41,9 @@ func (c *FileCapability) Execute(ctx context.Context, req capabilities.Capabilit
 	switch req.Params["action"] {
 	case "read":
 		data, err := os.ReadFile(targetPath)
-		if err != nil { return capabilities.CapabilityResponse{Success: false, Error: err.Error()}, nil }
+		if err != nil {
+			return capabilities.CapabilityResponse{Success: false, Error: err.Error()}, nil
+		}
 		return capabilities.CapabilityResponse{Success: true, Data: map[string]any{"content": string(data)}}, nil
 
 	case "write":
@@ -49,7 +53,9 @@ func (c *FileCapability) Execute(ctx context.Context, req capabilities.Capabilit
 			return capabilities.CapabilityResponse{Success: false, Error: "file too large (>5MB)"}, nil
 		}
 		err := os.WriteFile(targetPath, []byte(content), 0644)
-		if err != nil { return capabilities.CapabilityResponse{Success: false, Error: err.Error()}, nil }
+		if err != nil {
+			return capabilities.CapabilityResponse{Success: false, Error: err.Error()}, nil
+		}
 		return capabilities.CapabilityResponse{Success: true}, nil
 
 	default:

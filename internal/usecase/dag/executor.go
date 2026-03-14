@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/nikkofu/aether/internal/domain/capability"
 	"github.com/nikkofu/aether/internal/core/memory"
-	"github.com/nikkofu/aether/pkg/observability"
-	"github.com/nikkofu/aether/pkg/logging"
+	"github.com/nikkofu/aether/internal/domain/capability"
 	"github.com/nikkofu/aether/internal/domain/policy"
+	"github.com/nikkofu/aether/pkg/logging"
+	"github.com/nikkofu/aether/pkg/observability"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -164,7 +164,7 @@ func (e *PipelineExecutor) Execute(ctx context.Context, p *Pipeline) (map[string
 						return
 					}
 					inputMap := input.(map[string]any)
-					
+
 					// 注入输入参数快照到 Span
 					inputJSON, _ := json.Marshal(inputMap)
 					nodeSpan.SetAttributes(attribute.String("node.input", string(inputJSON)))
@@ -194,7 +194,7 @@ func (e *PipelineExecutor) Execute(ctx context.Context, p *Pipeline) (map[string
 						nodeSpan.SetStatus(codes.Error, err.Error())
 						// 记录失败时的上下文到日志
 						if e.logger != nil {
-							e.logger.Error(nodeCtx, "节点执行失败", 
+							e.logger.Error(nodeCtx, "节点执行失败",
 								logging.String("node_id", nodeID),
 								logging.String("skill", node.Skill),
 								logging.Err(err),
@@ -204,7 +204,7 @@ func (e *PipelineExecutor) Execute(ctx context.Context, p *Pipeline) (map[string
 						e.handleNodeFailure(nodeID, startTime, err, errCh, cancel)
 						return
 					}
-					
+
 					// 注入输出结果快照到 Span
 					outputJSON, _ := json.Marshal(output)
 					nodeSpan.SetAttributes(attribute.String("node.output", string(outputJSON)))

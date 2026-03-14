@@ -3,6 +3,7 @@ package risk
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/nikkofu/aether/internal/domain/economy"
 )
@@ -27,7 +28,9 @@ func NewRiskGuard(l economy.Ledger, maxSupply, maxSkew, maxFail float64) *RiskGu
 
 // CheckSystemHealth 检查全系统风险状态。如果返回 error，则应触发熔断。
 func (g *RiskGuard) CheckSystemHealth(ctx context.Context, orgID string) error {
-	if g.ledger == nil { return nil }
+	if g == nil || ledgerIsNil(g.ledger) {
+		return nil
+	}
 
 	// 1. 检查代币供应量
 	accounts, _ := g.ledger.TopAgentsByReputation(ctx, orgID, 100)
@@ -55,4 +58,17 @@ func (g *RiskGuard) CheckSystemHealth(ctx context.Context, orgID string) error {
 	}
 
 	return nil
+}
+
+func ledgerIsNil(ledger economy.Ledger) bool {
+	if ledger == nil {
+		return true
+	}
+	value := reflect.ValueOf(ledger)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }

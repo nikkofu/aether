@@ -10,10 +10,10 @@ import (
 	"github.com/nikkofu/aether/internal/domain/capability"
 	"github.com/nikkofu/aether/internal/domain/knowledge"
 	"github.com/nikkofu/aether/internal/usecase/learning"
+	"github.com/nikkofu/aether/internal/usecase/reflection"
 	"github.com/nikkofu/aether/pkg/logging"
 	"github.com/nikkofu/aether/pkg/observability"
 	"github.com/nikkofu/aether/pkg/observability/trace"
-	"github.com/nikkofu/aether/internal/usecase/reflection"
 	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
@@ -30,7 +30,7 @@ type DefaultAgentManager struct {
 	bus           Bus
 	graph         knowledge.Graph
 
-	reflector      reflection.Reflector
+	reflector       reflection.Reflector
 	reflectionStore reflection.Store
 	learningEngine  *learning.LearningEngine
 
@@ -40,12 +40,16 @@ type DefaultAgentManager struct {
 	totalFailures   int64
 	taskSpawns      map[string]int
 
-	scheduler       Scheduler
+	scheduler Scheduler
 }
 
 type Scheduler interface {
 	SelectWorker(ctx context.Context, role string) string
 	SelectByBidding(ctx context.Context, b Bus, role, taskID string, basePrice float64) string
+}
+
+type busSubscriber interface {
+	Subscribe(Agent)
 }
 
 func (m *DefaultAgentManager) SetScheduler(s Scheduler) {
@@ -86,9 +90,13 @@ func (m *DefaultAgentManager) Register(a Agent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.agents[a.Name()] = a
-	if m.bus != nil { a.SetBus(m.bus) }
-	if p, ok := a.(*PlannerAgent); ok { p.SetManager(m) }
-	
+	if m.bus != nil {
+		a.SetBus(m.bus)
+	}
+	if p, ok := a.(*PlannerAgent); ok {
+		p.SetManager(m)
+	}
+
 	if m.graph != nil {
 		m.graph.AddEntity(context.Background(), knowledge.Entity{
 			ID: a.Name(), Type: "agent", Name: a.Name(), Metadata: map[string]any{"role": a.Role()},
@@ -117,7 +125,9 @@ func (m *DefaultAgentManager) Spawn(ctx context.Context, role string, payload ma
 
 	taskID, _ := payload["task_id"].(string)
 	orgID, _ := payload["org_id"].(string)
-	if orgID == "" { orgID = "default" }
+	if orgID == "" {
+		orgID = "default"
+	}
 
 	if taskID != "" {
 		if m.taskSpawns[taskID] >= m.maxSpawnPerTask {
@@ -171,19 +181,29 @@ func (m *DefaultAgentManager) Spawn(ctx context.Context, role string, payload ma
 		a, err = factory(ctx, name, payload)
 	} else {
 		switch role {
-		case "planner": 
+		case "planner":
 			p := NewPlannerAgent(name, m.llmSkill, m.tracer)
 			p.SetGraph(m.graph) // 注入知识库支持 RAG
 			a = p
-		case "coder": a = NewCoderAgent(name, m.llmSkill, m.tracer)
-		case "reviewer": a = NewReviewerAgent(name, m.llmSkill, m.tracer)
-		default: return nil, fmt.Errorf("unsupported role")
+		case "coder":
+			a = NewCoderAgent(name, m.llmSkill, m.tracer)
+		case "reviewer":
+			a = NewReviewerAgent(name, m.llmSkill, m.tracer)
+		default:
+			return nil, fmt.Errorf("unsupported role")
 		}
 	}
 
-	if err != nil { return nil, err }
-	if m.bus != nil { a.SetBus(m.bus) }
-	
+	if err != nil {
+		return nil, err
+	}
+	if m.bus != nil {
+		a.SetBus(m.bus)
+		if subscriber, ok := m.bus.(busSubscriber); ok {
+			subscriber.Subscribe(a)
+		}
+	}
+
 	m.mu.Lock()
 	m.agents[name] = a
 	m.mu.Unlock()
@@ -193,7 +213,7 @@ func (m *DefaultAgentManager) Spawn(ctx context.Context, role string, payload ma
 	if m.graph != nil {
 		m.graph.AddEntity(ctx, knowledge.Entity{ID: name, Type: "agent", Name: name, Metadata: map[string]any{"role": role, "task_id": taskID}}, orgID)
 		if taskID != "" {
-			m.graph.AddRelation(ctx, knowledge.Relation{ID: "spawn-"+name, FromID: taskID, ToID: name, Type: "spawned"}, orgID)
+			m.graph.AddRelation(ctx, knowledge.Relation{ID: "spawn-" + name, FromID: taskID, ToID: name, Type: "spawned"}, orgID)
 		}
 	}
 
@@ -212,17 +232,23 @@ func (m *DefaultAgentManager) Unregister(ctx context.Context, name string, input
 
 	// 尝试从元数据获取 org_id
 	orgID := "default"
-	if m, ok := a.Metadata()["org_id"].(string); ok { orgID = m }
+	if m, ok := a.Metadata()["org_id"].(string); ok {
+		orgID = m
+	}
 
 	if m.reflector != nil {
 		go func() {
 			r, err := m.reflector.Reflect(context.Background(), input)
 			if err == nil {
-				if m.reflectionStore != nil { m.reflectionStore.Save(context.Background(), r) }
-				if m.learningEngine != nil { m.learningEngine.UpdateStrategy(r) }
+				if m.reflectionStore != nil {
+					m.reflectionStore.Save(context.Background(), r)
+				}
+				if m.learningEngine != nil {
+					m.learningEngine.UpdateStrategy(r)
+				}
 				if m.graph != nil {
 					m.graph.AddEntity(context.Background(), knowledge.Entity{ID: r.ID, Type: "reflection", Name: "Reflect:" + name, Metadata: map[string]any{"confidence": r.ConfidenceScore}}, orgID)
-					m.graph.AddRelation(context.Background(), knowledge.Relation{ID: "rel-"+r.ID, FromID: name, ToID: r.ID, Type: "reflected"}, orgID)
+					m.graph.AddRelation(context.Background(), knowledge.Relation{ID: "rel-" + r.ID, FromID: name, ToID: r.ID, Type: "reflected"}, orgID)
 				}
 			}
 		}()
@@ -235,7 +261,9 @@ func (m *DefaultAgentManager) List() []Agent {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	res := make([]Agent, 0, len(m.agents))
-	for _, a := range m.agents { res = append(res, a) }
+	for _, a := range m.agents {
+		res = append(res, a)
+	}
 	return res
 }
 
@@ -250,6 +278,8 @@ func (m *DefaultAgentManager) GetStats() ManagerStats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	stats := ManagerStats{ActiveAgents: len(m.agents), TotalSpawns: atomic.LoadInt64(&m.totalSpawns), TotalFailures: atomic.LoadInt64(&m.totalFailures), StatusCounts: make(map[Status]int)}
-	for _, a := range m.agents { stats.StatusCounts[a.Status()]++ }
+	for _, a := range m.agents {
+		stats.StatusCounts[a.Status()]++
+	}
 	return stats
 }

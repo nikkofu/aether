@@ -34,8 +34,12 @@ func (e *SkillEvaluator) Evaluate(ctx context.Context, v domain_skills.SkillVers
 	// 注入随机噪声（模拟环境不确定性）
 	score += (rand.Float64() - 0.5) * 0.05
 
-	if score > 1.0 { score = 1.0 }
-	if score < 0.0 { score = 0.0 }
+	if score > 1.0 {
+		score = 1.0
+	}
+	if score < 0.0 {
+		score = 0.0
+	}
 
 	return score, nil
 }

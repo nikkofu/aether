@@ -1,8 +1,16 @@
-import { startTransition, useEffect, useState, type FormEvent } from 'react';
+import { startTransition, useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Activity, ChevronRight, Clock3, FileText, ListTodo, RotateCcw, Server, ShieldCheck, Sparkles, Square, TerminalSquare, Wifi } from 'lucide-react';
 import './App.css';
 
 type TaskStatus = 'queued' | 'running' | 'reviewing' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+type WorkflowPattern =
+  | 'sequential'
+  | 'parallel'
+  | 'loop'
+  | 'review_critique'
+  | 'iterative_refinement'
+  | 'coordinator'
+  | 'hierarchical';
 
 interface Task {
   id: string;
@@ -10,6 +18,7 @@ interface Task {
   attempt: number;
   source: string;
   mode: string;
+  workflow_pattern: WorkflowPattern;
   description: string;
   input?: Record<string, unknown>;
   status: TaskStatus;
@@ -68,6 +77,23 @@ interface TaskStreamUpdate {
   event?: TaskEvent;
 }
 
+interface ParallelBranchDraft {
+  id: string;
+  name: string;
+  task: string;
+}
+
+let parallelBranchDraftCounter = 0;
+
+function createParallelBranchDraft(name = '', task = ''): ParallelBranchDraft {
+  parallelBranchDraftCounter += 1;
+  return {
+    id: `parallel-branch-${parallelBranchDraftCounter}`,
+    name,
+    task,
+  };
+}
+
 function upsertTask(currentTasks: Task[], nextTask: Task) {
   const existingIndex = currentTasks.findIndex((task) => task.id === nextTask.id);
   if (existingIndex === -1) {
@@ -86,6 +112,60 @@ function appendEvent(currentEvents: TaskEvent[], nextEvent: TaskEvent) {
   return [...currentEvents, nextEvent];
 }
 
+function buildParallelBranchInput(branches: ParallelBranchDraft[]) {
+  return branches
+    .map((branch) => {
+      const task = branch.task.trim();
+      if (!task) {
+        return null;
+      }
+      const name = branch.name.trim();
+      if (!name) {
+        return { task };
+      }
+      return { name, task };
+    })
+    .filter((branch): branch is { task: string; name?: string } => branch !== null);
+}
+
+const taskWorkflowOptions: Array<{ value: WorkflowPattern; label: string; hint: string }> = [
+  {
+    value: 'sequential',
+    label: 'Sequential',
+    hint: 'Planner to coder to reviewer as a single ordered chain.',
+  },
+  {
+    value: 'parallel',
+    label: 'Parallel',
+    hint: 'Explicit fan-out and fan-in workflow that runs predefined branches concurrently.',
+  },
+  {
+    value: 'loop',
+    label: 'Loop',
+    hint: 'Official loop pattern with bounded coder and reviewer refinement cycles.',
+  },
+  {
+    value: 'coordinator',
+    label: 'Coordinator',
+    hint: 'Workflow agent delegates milestone execution through tactical and operational workers.',
+  },
+  {
+    value: 'hierarchical',
+    label: 'Hierarchical',
+    hint: 'Workflow agent routes goal delivery through strategic, tactical, and operational layers.',
+  },
+  {
+    value: 'iterative_refinement',
+    label: 'Iterative Refinement',
+    hint: 'Official loop pattern for repeated coder and reviewer refinement cycles.',
+  },
+  {
+    value: 'review_critique',
+    label: 'Review Critique',
+    hint: 'Workflow agent drives iterative coder and reviewer loops.',
+  },
+];
+
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState('');
@@ -94,6 +174,11 @@ function App() {
   const [status, setStatus] = useState<'loading' | 'connected' | 'error'>('loading');
   const [streamStatus, setStreamStatus] = useState<'idle' | 'live' | 'error'>('idle');
   const [draft, setDraft] = useState('');
+  const [draftWorkflow, setDraftWorkflow] = useState<WorkflowPattern>('sequential');
+  const [draftMaxReviewIterations, setDraftMaxReviewIterations] = useState(3);
+  const [draftParallelBranches, setDraftParallelBranches] = useState<ParallelBranchDraft[]>([
+    createParallelBranchDraft(),
+  ]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [actionState, setActionState] = useState<'idle' | 'retry' | 'cancel'>('idle');
@@ -101,9 +186,9 @@ function App() {
   const [health, setHealth] = useState<HealthSnapshot | null>(null);
   const [agents, setAgents] = useState<AgentSnapshot[]>([]);
   const [agentStats, setAgentStats] = useState<AgentStats | null>(null);
-  const daemonBaseUrl = import.meta.env.VITE_AETHERD_URL ?? 'http://localhost:8080';
+  const daemonBaseUrl = import.meta.env.VITE_AETHERD_URL ?? 'http://localhost:8090';
 
-  async function loadTasks() {
+  const loadTasks = useCallback(async () => {
     try {
       const response = await fetch(`${daemonBaseUrl}/api/v1/tasks?limit=50`);
       if (!response.ok) {
@@ -136,9 +221,9 @@ function App() {
       console.error('Load tasks failed', err);
       setStatus('error');
     }
-  }
+  }, [daemonBaseUrl, selectedTaskId]);
 
-  async function loadSelectedTask(taskID: string) {
+  const loadSelectedTask = useCallback(async (taskID: string) => {
     try {
       const [taskResponse, eventsResponse] = await Promise.all([
         fetch(`${daemonBaseUrl}/api/v1/tasks/${taskID}`),
@@ -163,9 +248,9 @@ function App() {
       console.error('Load selected task failed', err);
       setStatus('error');
     }
-  }
+  }, [daemonBaseUrl]);
 
-  async function loadSystemState() {
+  const loadSystemState = useCallback(async () => {
     try {
       const [healthResponse, agentsResponse] = await Promise.all([
         fetch(`${daemonBaseUrl}/api/v1/health`),
@@ -189,7 +274,7 @@ function App() {
     } catch (err) {
       console.error('Load system state failed', err);
     }
-  }
+  }, [daemonBaseUrl]);
 
   useEffect(() => {
     void loadTasks();
@@ -197,7 +282,7 @@ function App() {
       void loadTasks();
     }, 5000);
     return () => window.clearInterval(interval);
-  }, [daemonBaseUrl, selectedTaskId]);
+  }, [loadTasks]);
 
   useEffect(() => {
     void loadSystemState();
@@ -205,7 +290,7 @@ function App() {
       void loadSystemState();
     }, 10000);
     return () => window.clearInterval(interval);
-  }, [daemonBaseUrl]);
+  }, [loadSystemState]);
 
   useEffect(() => {
     if (!selectedTaskId) {
@@ -257,7 +342,7 @@ function App() {
       stream.close();
       setStreamStatus('idle');
     };
-  }, [daemonBaseUrl, selectedTaskId]);
+  }, [daemonBaseUrl, loadSelectedTask, selectedTaskId]);
 
   async function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -270,6 +355,16 @@ function App() {
     setSubmitError('');
 
     try {
+      let taskInput: Record<string, unknown> | undefined;
+      if (draftWorkflow === 'parallel') {
+        const branches = buildParallelBranchInput(draftParallelBranches);
+        taskInput = branches.length > 0
+          ? { parallel_branches: branches }
+          : undefined;
+      } else if (draftWorkflow === 'loop' || draftWorkflow === 'review_critique' || draftWorkflow === 'iterative_refinement') {
+        taskInput = { max_review_iterations: draftMaxReviewIterations };
+      }
+
       const response = await fetch(`${daemonBaseUrl}/api/v1/tasks`, {
         method: 'POST',
         headers: {
@@ -278,7 +373,9 @@ function App() {
         body: JSON.stringify({
           source: 'web_ui',
           mode: 'agent',
+          workflow_pattern: draftWorkflow,
           description: draft.trim(),
+          input: taskInput,
         }),
       });
 
@@ -289,6 +386,7 @@ function App() {
       const createdTask = (await response.json()) as Task;
       startTransition(() => {
         setDraft('');
+        setDraftParallelBranches([createParallelBranchDraft()]);
         setSelectedTaskId(createdTask.id);
         setSelectedTask(createdTask);
         setEvents([]);
@@ -376,6 +474,27 @@ function App() {
   const canCancel = selectedTask ? ['queued', 'running', 'reviewing'].includes(selectedTask.status) : false;
   const canRetry = selectedTask ? ['completed', 'failed', 'cancelled', 'interrupted'].includes(selectedTask.status) : false;
 
+  function updateParallelBranchDraft(id: string, field: 'name' | 'task', value: string) {
+    setDraftParallelBranches((currentBranches) => currentBranches.map((branch) => (
+      branch.id === id
+        ? { ...branch, [field]: value }
+        : branch
+    )));
+  }
+
+  function addParallelBranchDraft() {
+    setDraftParallelBranches((currentBranches) => [...currentBranches, createParallelBranchDraft()]);
+  }
+
+  function removeParallelBranchDraft(id: string) {
+    setDraftParallelBranches((currentBranches) => {
+      if (currentBranches.length === 1) {
+        return [createParallelBranchDraft()];
+      }
+      return currentBranches.filter((branch) => branch.id !== id);
+    });
+  }
+
   return (
     <div className="w-full min-h-screen px-4 py-6 md:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
@@ -416,6 +535,85 @@ function App() {
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                 />
+                <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  Workflow Pattern
+                </label>
+                <select
+                  className="w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50"
+                  value={draftWorkflow}
+                  onChange={(event) => setDraftWorkflow(event.target.value as WorkflowPattern)}
+                >
+                  {taskWorkflowOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500">
+                  {taskWorkflowOptions.find((option) => option.value === draftWorkflow)?.hint}
+                </p>
+                {draftWorkflow === 'parallel' ? (
+                  <>
+                    <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                      Parallel Branches
+                    </label>
+                    <div className="space-y-3">
+                      {draftParallelBranches.map((branch, index) => (
+                        <div key={branch.id} className="rounded-2xl border border-slate-700 bg-slate-950/50 p-3">
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <span className="font-mono text-xs uppercase tracking-[0.2em] text-slate-400">
+                              Branch {index + 1}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeParallelBranchDraft(branch.id)}
+                              className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-300 transition hover:text-rose-200"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <input
+                            className="mb-3 w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50"
+                            placeholder="Branch name, for example: Plan"
+                            value={branch.name}
+                            onChange={(event) => updateParallelBranchDraft(branch.id, 'name', event.target.value)}
+                          />
+                          <textarea
+                            className="min-h-24 w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50"
+                            placeholder="Branch task, for example: Analyze architecture constraints and identify risky runtime couplings."
+                            value={branch.task}
+                            onChange={(event) => updateParallelBranchDraft(branch.id, 'task', event.target.value)}
+                          />
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={addParallelBranchDraft}
+                        className="w-full rounded-2xl border border-dashed border-cyan-500/30 bg-cyan-500/5 px-4 py-3 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/10"
+                      >
+                        Add Branch
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Optional. Define explicit `name` and `task` pairs. If all branch tasks are left empty, the runtime falls back to its built-in default branches.
+                    </p>
+                  </>
+                ) : null}
+                {draftWorkflow === 'loop' || draftWorkflow === 'review_critique' || draftWorkflow === 'iterative_refinement' ? (
+                  <>
+                    <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                      Max Review Iterations
+                    </label>
+                    <input
+                      className="w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={draftMaxReviewIterations}
+                      onChange={(event) => setDraftMaxReviewIterations(Math.max(1, Number.parseInt(event.target.value || '1', 10) || 1))}
+                    />
+                  </>
+                ) : null}
                 <button
                   type="submit"
                   disabled={submitting}
@@ -605,6 +803,10 @@ function App() {
                         <p className="font-mono text-slate-200">{selectedTask.mode}</p>
                       </div>
                       <div>
+                        <p className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-500">Workflow</p>
+                        <p className="font-mono text-slate-200">{selectedTask.workflow_pattern}</p>
+                      </div>
+                      <div>
                         <p className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-500">Attempt</p>
                         <p className="font-mono text-slate-200">{selectedTask.attempt}</p>
                       </div>
@@ -623,6 +825,16 @@ function App() {
                         <p className="break-all font-mono text-xs text-slate-300">
                           {selectedTask.trace_id || 'Not recorded yet'}
                         </p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-500">Task Input</p>
+                        {selectedTask.input && Object.keys(selectedTask.input).length > 0 ? (
+                          <pre className="overflow-x-auto whitespace-pre-wrap rounded-2xl border border-white/5 bg-black/30 p-3 font-mono text-xs leading-5 text-slate-300">
+                            {JSON.stringify(selectedTask.input, null, 2)}
+                          </pre>
+                        ) : (
+                          <p className="font-mono text-xs text-slate-300">No explicit task input.</p>
+                        )}
                       </div>
                     </div>
                   </div>

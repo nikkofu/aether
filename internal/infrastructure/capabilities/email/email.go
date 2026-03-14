@@ -40,7 +40,9 @@ func (c *EmailCapability) Execute(ctx context.Context, req capabilities.Capabili
 
 		to, _ := req.Params["to"].(string)
 		subject, _ := req.Params["subject"].(string)
-		if to == "" || subject == "" { return capabilities.CapabilityResponse{Success: false, Error: "missing params"}, nil }
+		if to == "" || subject == "" {
+			return capabilities.CapabilityResponse{Success: false, Error: "missing params"}, nil
+		}
 
 		// 2. 模拟发送逻辑 (实际应调用 SMTP 库)
 		fmt.Printf("[EMAIL SENT] To: %s, Sub: %s (Org: %s)\n", to, subject, req.OrgID)

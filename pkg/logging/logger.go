@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Field 是 zap.Field 的别名。
@@ -35,7 +35,7 @@ type Config struct {
 // NewLogger 创建一个新的 ZapLogger 实例。
 func NewLogger(cfg Config) (*ZapLogger, error) {
 	var encoderCfg zapcore.EncoderConfig
-	
+
 	if cfg.Format == "json" {
 		encoderCfg = zap.NewProductionEncoderConfig()
 	} else {
@@ -76,7 +76,7 @@ func (zl *ZapLogger) extractTraceInfo(ctx context.Context) []Field {
 	if ctx == nil {
 		return nil
 	}
-	
+
 	span := trace.SpanFromContext(ctx)
 	if !span.SpanContext().IsValid() {
 		return nil
@@ -85,7 +85,7 @@ func (zl *ZapLogger) extractTraceInfo(ctx context.Context) []Field {
 	fields := make([]Field, 0, 2)
 	fields = append(fields, zap.String("trace_id", span.SpanContext().TraceID().String()))
 	fields = append(fields, zap.String("span_id", span.SpanContext().SpanID().String()))
-	
+
 	return fields
 }
 
@@ -111,8 +111,8 @@ func (zl *ZapLogger) Sync() error {
 
 // 辅助函数
 func String(key, val string) Field                 { return zap.String(key, val) }
-func Int(key string, val int) Field                    { return zap.Int(key, val) }
-func Float64(key string, val float64) Field            { return zap.Float64(key, val) }
-func Duration(key string, val time.Duration) Field     { return zap.Duration(key, val) }
-func Any(key string, val any) Field                    { return zap.Any(key, val) }
-func Err(err error) Field                              { return zap.Error(err) }
+func Int(key string, val int) Field                { return zap.Int(key, val) }
+func Float64(key string, val float64) Field        { return zap.Float64(key, val) }
+func Duration(key string, val time.Duration) Field { return zap.Duration(key, val) }
+func Any(key string, val any) Field                { return zap.Any(key, val) }
+func Err(err error) Field                          { return zap.Error(err) }

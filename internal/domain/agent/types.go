@@ -7,11 +7,22 @@ import (
 
 // 核心系统消息类型
 const (
-	TypeSystemAlert   = "system.alert"
-	TypeSystemSpawn   = "system.spawn"
-	TypeTaskTender    = "system.task_tender"    // 任务招标
-	TypeBidSubmission = "system.bid_submission" // 提交竞标
-	TypeTaskAward     = "system.task_award"     // 授予任务
+	TypeSystemAlert                 = "system.alert"
+	TypeSystemSpawn                 = "system.spawn"
+	TypeTaskTender                  = "system.task_tender"    // 任务招标
+	TypeBidSubmission               = "system.bid_submission" // 提交竞标
+	TypeTaskAward                   = "system.task_award"     // 授予任务
+	TypeCoordinationResult          = "coordination.result"
+	TypeDraftGenerated              = "draft.generated"
+	TypeGoalResult                  = "goal.result"
+	TypePlanGenerated               = "plan.generated"
+	TypeWorkflowCoordinatorStart    = "workflow.coordinator.start"
+	TypeWorkflowHierarchicalStart   = "workflow.hierarchical.start"
+	TypeWorkflowIterativeStart      = "workflow.iterative_refinement.start"
+	TypeWorkflowLoopStart           = "workflow.loop.start"
+	TypeWorkflowParallelStart       = "workflow.parallel.start"
+	TypeWorkflowSequentialStart     = "workflow.sequential.start"
+	TypeWorkflowReviewCritiqueStart = "workflow.review_critique.start"
 )
 
 // AgentRoleFactory 定义了如何动态创建一个特定角色的代理。

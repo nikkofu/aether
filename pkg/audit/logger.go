@@ -40,7 +40,9 @@ type SQLiteLogger struct {
 
 func NewSQLiteLogger(db *sql.DB) (*SQLiteLogger, error) {
 	l := &SQLiteLogger{db: db}
-	if err := l.init(context.Background()); err != nil { return nil, err }
+	if err := l.init(context.Background()); err != nil {
+		return nil, err
+	}
 	return l, nil
 }
 
@@ -69,7 +71,9 @@ func (l *SQLiteLogger) Log(ctx context.Context, orgID string, eventType EventTyp
 func (l *SQLiteLogger) QueryByTimeRange(ctx context.Context, orgID string, start, end time.Time) ([]LogEntry, error) {
 	query := `SELECT id, org_id, event_type, description, metadata, created_at FROM audit_logs WHERE org_id = ? AND created_at BETWEEN ? AND ? ORDER BY created_at ASC`
 	rows, err := l.db.QueryContext(ctx, query, orgID, start, end)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var results []LogEntry
 	for rows.Next() {

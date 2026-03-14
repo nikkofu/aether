@@ -11,12 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nikkofu/aether/internal/domain/agent"
+	"github.com/nikkofu/aether/internal/app"
 	"github.com/nikkofu/aether/internal/delivery/cli"
+	"github.com/nikkofu/aether/internal/domain/agent"
+	taskdomain "github.com/nikkofu/aether/internal/domain/task"
 	"github.com/nikkofu/aether/internal/usecase/cluster"
+	taskusecase "github.com/nikkofu/aether/internal/usecase/task"
 	"github.com/nikkofu/aether/pkg/config"
 	"github.com/nikkofu/aether/pkg/observability/otel"
-	"github.com/nikkofu/aether/internal/app"
 	go_otel "go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -25,7 +27,7 @@ func main() {
 	// 初始化 OpenTelemetry
 	shutdown, err := otel.InitTracer("aether-node")
 	if err != nil {
-		panic(fmt.Sprintf("无法初始化 OpenTelemetry: %v", err) )
+		panic(fmt.Sprintf("无法初始化 OpenTelemetry: %v", err))
 	}
 	defer shutdown(context.Background())
 
@@ -47,7 +49,9 @@ func main() {
 		}
 	}
 
-	if *modeFlag != "" { cfg.App.Mode = *modeFlag }
+	if *modeFlag != "" {
+		cfg.App.Mode = *modeFlag
+	}
 
 	rt := app.NewDefaultRuntime(cfg)
 	defer rt.Close()
@@ -145,7 +149,9 @@ func handleExport(ctx context.Context, rt *app.Runtime, args []string) {
 }
 
 func handleStrategic(ctx context.Context, rt *app.Runtime, args []string) {
-	if len(args) < 1 { return }
+	if len(args) < 1 {
+		return
+	}
 	switch args[0] {
 	case "vision":
 		vCmd := flag.NewFlagSet("vision", flag.ExitOnError)
@@ -163,11 +169,7 @@ func handleStrategic(ctx context.Context, rt *app.Runtime, args []string) {
 	case "start":
 		fmt.Println("Starting Strategic Engine...")
 		go rt.StrategicEngine().Start(ctx)
-		rt.InitAgent("supervisor")
-		rt.InitAgent("planner")
-		rt.InitAgent("coder")
-		rt.InitAgent("reviewer")
-		rt.StartAgents(ctx)
+		rt.StartAgentsForPatterns(ctx, taskdomain.PatternSequential, taskdomain.PatternParallel, taskdomain.PatternCoordinator, taskdomain.PatternHierarchical)
 		<-ctx.Done()
 	}
 }
@@ -178,11 +180,29 @@ func printJSON(data any) {
 }
 
 func handleTask(ctx context.Context, rt *app.Runtime, args []string) {
-	if len(args) < 1 {
-		fmt.Println("用法: aether task <task_description>")
+	taskCmd := flag.NewFlagSet("task", flag.ContinueOnError)
+	workflowFlag := taskCmd.String("workflow", string(taskdomain.PatternSequential), "执行工作流模式")
+	maxReviewIterations := taskCmd.Int("max-review-iterations", 3, "loop / review_critique / iterative_refinement 模式下的最大评审轮次")
+	parallelBranches := taskCmd.String("parallel-branches", "", "parallel 模式下的分支列表，使用 '||' 或换行分隔")
+	if err := taskCmd.Parse(args); err != nil {
+		fmt.Println("用法: aether task [-workflow=sequential|parallel|loop|coordinator|hierarchical|iterative_refinement|review_critique] [-max-review-iterations=3] [-parallel-branches='branch1||branch2'] <task_description>")
 		return
 	}
-	taskDesc := args[0]
+	if taskCmd.NArg() < 1 {
+		fmt.Println("用法: aether task [-workflow=sequential|parallel|loop|coordinator|hierarchical|iterative_refinement|review_critique] [-max-review-iterations=3] [-parallel-branches='branch1||branch2'] <task_description>")
+		return
+	}
+	taskDesc := parseTaskDescriptionArgs(taskCmd.Args())
+	if taskDesc == "" {
+		fmt.Println("用法: aether task [-workflow=sequential|parallel|loop|coordinator|hierarchical|iterative_refinement|review_critique] [-max-review-iterations=3] [-parallel-branches='branch1||branch2'] <task_description>")
+		return
+	}
+	workflowPattern := taskdomain.WorkflowPattern(*workflowFlag)
+	taskService := rt.TaskService()
+	if taskService == nil {
+		fmt.Fprintln(os.Stderr, "任务服务不可用，无法提交任务。")
+		os.Exit(1)
+	}
 
 	// 1. Tracing: 开启根 Span
 	tracer := go_otel.Tracer("aether-cli")
@@ -195,66 +215,183 @@ func handleTask(ctx context.Context, rt *app.Runtime, args []string) {
 	fmt.Printf("🔗 Jaeger 监控: http://localhost:16686/trace/%s\n", traceID)
 	fmt.Println("--------------------------------------------------------------------------------")
 
-	// 2. 核心：在启动 Agent 前先订阅。统一反馈主题为 "cli"
-	doneChan := make(chan string, 1)
+	// 2. 核心：订阅 CLI 主题获取流式 token，再通过 TaskService 观察任务生命周期。
+	doneChan := make(chan *taskdomain.Task, 1)
 	rt.GetBus().SubscribeToSubject(ctx, "cli", func(msg agent.Message) {
 		switch msg.Type {
 		case "token":
 			if token, ok := msg.Payload["token"].(string); ok {
 				agentName, _ := msg.Payload["agent"].(string)
-				color := "\033[37m" 
-				if strings.Contains(agentName, "planner") { color = "\033[32m" }
-				if strings.Contains(agentName, "supervisor") { color = "\033[35m" }
-				if strings.Contains(agentName, "coder") { color = "\033[34m" }
-				if strings.Contains(agentName, "reviewer") { color = "\033[33m" }
+				color := "\033[37m"
+				if strings.Contains(agentName, "planner") {
+					color = "\033[32m"
+				}
+				if strings.Contains(agentName, "supervisor") {
+					color = "\033[35m"
+				}
+				if strings.Contains(agentName, "coder") {
+					color = "\033[34m"
+				}
+				if strings.Contains(agentName, "reviewer") {
+					color = "\033[33m"
+				}
 
 				processedToken := token
-				if strings.Contains(token, "Thought:") { processedToken = "\033[1;33m" + token + "\033[0m" + color }
-				if strings.Contains(token, "Action:") { processedToken = "\033[1;32m" + token + "\033[0m" + color }
-				if strings.Contains(token, "Observation:") { processedToken = "\033[1;36m" + token + "\033[0m" + color }
+				if strings.Contains(token, "Thought:") {
+					processedToken = "\033[1;33m" + token + "\033[0m" + color
+				}
+				if strings.Contains(token, "Action:") {
+					processedToken = "\033[1;32m" + token + "\033[0m" + color
+				}
+				if strings.Contains(token, "Observation:") {
+					processedToken = "\033[1;36m" + token + "\033[0m" + color
+				}
 
 				fmt.Fprintf(os.Stderr, "%s%s\033[0m", color, processedToken)
 			}
-		case "final_report":
-			result, _ := msg.Payload["result"].(string)
-			doneChan <- result
 		case "system.healing":
 			fmt.Printf("\n\033[1;31m🛠️  [自愈系统] %v\033[0m\n", msg.Payload["message"])
 		}
 	})
 
 	// 3. 唤醒集群
-	go rt.StartAgents(ctx)
+	go rt.StartAgentsForPatterns(ctx, workflowPattern)
 	fmt.Print("⚙️  系统正在冷启动模型与订阅总线...")
 	time.Sleep(1 * time.Second)
 	fmt.Println(" [OK]")
 
-	// 4. 下发任务
-	taskID := fmt.Sprintf("t-%d", time.Now().Unix())
-	fmt.Fprintf(os.Stderr, "📡 任务下发 (ID: %s)...\n", taskID)
-	fmt.Println("🧠 Thinking...")
-	
-	rt.GetBus().Publish(ctx, agent.Message{
-		ID: taskID, From: "cli", To: "supervisor",
-		Type: "task", Timestamp: time.Now(),
-		Payload: map[string]any{
-			"description": taskDesc, 
-			"org_id": "default",
-			"trace_id": traceID,
-		},
+	// 4. 统一通过 TaskService 下发任务。
+	var taskInput map[string]any
+	switch taskdomain.NormalizeWorkflowPattern(workflowPattern) {
+	case taskdomain.PatternParallel:
+		if branches := parseParallelBranchesFlag(*parallelBranches); len(branches) > 0 {
+			taskInput = map[string]any{
+				taskdomain.ParallelBranchesInputKey: branches,
+			}
+		}
+	case taskdomain.PatternLoop, taskdomain.PatternReviewCritique, taskdomain.PatternIterativeRefinement:
+		taskInput = map[string]any{
+			taskdomain.MaxReviewIterationsInputKey: *maxReviewIterations,
+		}
+	}
+
+	submittedTask, err := taskService.Submit(ctx, taskusecase.SubmitInput{
+		Source:          "cli",
+		Mode:            "agent",
+		WorkflowPattern: workflowPattern,
+		Description:     taskDesc,
+		Input:           taskInput,
+		TraceID:         traceID,
+		OrgID:           "default",
 	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "任务提交失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	taskID := submittedTask.ID
+	updates, cancel := taskService.Subscribe(taskID, 64)
+	defer cancel()
+
+	go func() {
+		for update := range updates {
+			if update.Event != nil && shouldLogTaskEvent(update.Event.Type) {
+				from := update.Event.From
+				if from == "" {
+					from = "task-service"
+				}
+				to := update.Event.To
+				if to == "" {
+					to = "-"
+				}
+				fmt.Fprintf(os.Stderr, "\n[%s] %s -> %s\n", update.Event.Type, from, to)
+			}
+
+			if update.Task != nil && isTerminalTaskStatus(update.Task.Status) {
+				select {
+				case doneChan <- update.Task:
+				default:
+				}
+				return
+			}
+		}
+	}()
+
+	currentTask, err := taskService.Get(ctx, taskID)
+	if err == nil && isTerminalTaskStatus(currentTask.Status) {
+		select {
+		case doneChan <- currentTask:
+		default:
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "📡 任务下发 (ID: %s, workflow: %s)...\n", taskID, submittedTask.WorkflowPattern)
+	fmt.Println("🧠 Thinking...")
 
 	// 5. 阻塞等待直至完成或超时
 	select {
 	case result := <-doneChan:
+		if result.Status != taskdomain.StatusCompleted {
+			fmt.Printf("\n--------------------------------------------------------------------------------")
+			fmt.Printf("\n❌ 任务未完成 (%s)\n", result.Status)
+			if result.ErrorSummary != "" {
+				fmt.Printf("\n--- 错误摘要 ---\n%s\n----------------\n", result.ErrorSummary)
+			}
+			time.Sleep(500 * time.Millisecond)
+			os.Exit(1)
+		}
 		fmt.Printf("\n--------------------------------------------------------------------------------")
-		fmt.Printf("\n✨ 任务执行成功!\n\n--- 最终交付物 ---\n%s\n------------------\n", result)
+		fmt.Printf("\n✨ 任务执行成功!\n\n--- 最终交付物 ---\n%s\n------------------\n", result.FinalOutput)
 		fmt.Println("\n✅ Aether 流程已全线闭环。")
 		time.Sleep(500 * time.Millisecond) // 留时间给 OTel Flush
-		os.Exit(0) // 强制退出
+		os.Exit(0)                         // 强制退出
 	case <-ctx.Done():
 		fmt.Println("\n🛑 用户手动中断或执行超时")
 		os.Exit(1)
+	}
+}
+
+func isTerminalTaskStatus(status taskdomain.Status) bool {
+	switch status {
+	case taskdomain.StatusCompleted,
+		taskdomain.StatusFailed,
+		taskdomain.StatusCancelled,
+		taskdomain.StatusInterrupted:
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldLogTaskEvent(eventType string) bool {
+	switch eventType {
+	case "task.submitted",
+		agent.TypeWorkflowCoordinatorStart,
+		agent.TypeWorkflowHierarchicalStart,
+		agent.TypeWorkflowIterativeStart,
+		agent.TypeWorkflowLoopStart,
+		agent.TypeWorkflowParallelStart,
+		agent.TypeWorkflowSequentialStart,
+		agent.TypeWorkflowReviewCritiqueStart,
+		"goal.assigned",
+		agent.TypeGoalResult,
+		"milestone.assigned",
+		"milestone.feedback",
+		"task.assigned",
+		"task.completed",
+		agent.TypeCoordinationResult,
+		"task_plan_request",
+		agent.TypePlanGenerated,
+		"instruction",
+		agent.TypeDraftGenerated,
+		"review_request",
+		"review_result",
+		"final_report",
+		"task.dispatch_failed",
+		agent.TypeSystemAlert:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -266,7 +403,9 @@ func startLeader(ctx context.Context, rt *app.Runtime, task string) {
 }
 
 func startWorker(ctx context.Context, rt *app.Runtime, role, nodeID string) {
-	if err := rt.InitAgent(role); err != nil { return }
+	if err := rt.InitAgent(role); err != nil {
+		return
+	}
 	cluster.StartWorkerHeartbeat(ctx, rt.GetBus(), role, nodeID, rt.Logger())
 	rt.StartAgents(ctx)
 	<-ctx.Done()
@@ -288,4 +427,15 @@ func (l *leaderAgent) Handle(ctx context.Context, msg agent.Message) ([]agent.Me
 
 func printUsage() {
 	fmt.Println("AetherCLI - 企业级 AI 操作系统")
+}
+
+func parseParallelBranchesFlag(raw string) []map[string]any {
+	return taskdomain.ParallelBranchesToInput(taskdomain.ParseParallelBranchesText(raw))
+}
+
+func parseTaskDescriptionArgs(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(strings.Join(args, " "))
 }

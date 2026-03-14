@@ -22,11 +22,21 @@ func (m *mockSkillEngine) Execute(ctx context.Context, skillID string, input map
 }
 
 func (m *mockSkillEngine) Register(ctx context.Context, skill domain_skills.Skill) error { return nil }
-func (m *mockSkillEngine) RegisterVersion(ctx context.Context, version domain_skills.SkillVersion) error { return nil }
-func (m *mockSkillEngine) ActivateVersion(ctx context.Context, skillID, version string) error { return nil }
-func (m *mockSkillEngine) ListActive(ctx context.Context) ([]domain_skills.Skill, error) { return nil, nil }
-func (m *mockSkillEngine) GetVersion(ctx context.Context, skillID, version string) (*domain_skills.SkillVersion, error) { return nil, nil }
-func (m *mockSkillEngine) ListVersions(ctx context.Context, skillID string) ([]domain_skills.SkillVersion, error) { return nil, nil }
+func (m *mockSkillEngine) RegisterVersion(ctx context.Context, version domain_skills.SkillVersion) error {
+	return nil
+}
+func (m *mockSkillEngine) ActivateVersion(ctx context.Context, skillID, version string) error {
+	return nil
+}
+func (m *mockSkillEngine) ListActive(ctx context.Context) ([]domain_skills.Skill, error) {
+	return nil, nil
+}
+func (m *mockSkillEngine) GetVersion(ctx context.Context, skillID, version string) (*domain_skills.SkillVersion, error) {
+	return nil, nil
+}
+func (m *mockSkillEngine) ListVersions(ctx context.Context, skillID string) ([]domain_skills.SkillVersion, error) {
+	return nil, nil
+}
 
 func TestPolyglotCompiler_Compile_GoDirect(t *testing.T) {
 	logger, _ := logging.NewLogger(logging.Config{Level: "error"})
@@ -67,7 +77,7 @@ func main() {
 
 func TestPolyglotCompiler_Compile_PythonTranslated(t *testing.T) {
 	logger, _ := logging.NewLogger(logging.Config{Level: "error"})
-	
+
 	// 模拟 LLM 成功将 Python 转换为对应的 Go 代码
 	mockLLM := &mockSkillEngine{
 		expectedOutput: `

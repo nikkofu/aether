@@ -12,25 +12,29 @@ import (
 	"github.com/google/uuid"
 	agentdomain "github.com/nikkofu/aether/internal/domain/agent"
 	taskdomain "github.com/nikkofu/aether/internal/domain/task"
+	workflowusecase "github.com/nikkofu/aether/internal/usecase/workflow"
 	"github.com/nikkofu/aether/pkg/bus"
 	"github.com/nikkofu/aether/pkg/logging"
 )
 
 var (
-	ErrTaskNotFound      = errors.New("task not found")
-	ErrTaskNotCancelable = errors.New("task is not cancelable")
-	ErrTaskNotRetryable  = errors.New("task is not retryable")
+	ErrTaskNotFound                  = errors.New("task not found")
+	ErrTaskNotCancelable             = errors.New("task is not cancelable")
+	ErrTaskNotRetryable              = errors.New("task is not retryable")
+	ErrWorkflowPatternInvalid        = errors.New("workflow pattern is invalid")
+	ErrWorkflowPatternNotImplemented = errors.New("workflow pattern is not implemented")
 )
 
 type SubmitInput struct {
-	ParentTaskID string         `json:"parent_task_id"`
-	Attempt      int            `json:"attempt"`
-	Source       string         `json:"source"`
-	Mode         string         `json:"mode"`
-	Description  string         `json:"description"`
-	Input        map[string]any `json:"input"`
-	TraceID      string         `json:"trace_id"`
-	OrgID        string         `json:"org_id"`
+	ParentTaskID    string                     `json:"parent_task_id"`
+	Attempt         int                        `json:"attempt"`
+	Source          string                     `json:"source"`
+	Mode            string                     `json:"mode"`
+	WorkflowPattern taskdomain.WorkflowPattern `json:"workflow_pattern"`
+	Description     string                     `json:"description"`
+	Input           map[string]any             `json:"input"`
+	TraceID         string                     `json:"trace_id"`
+	OrgID           string                     `json:"org_id"`
 }
 
 type Update struct {
@@ -43,29 +47,58 @@ type executionState struct {
 	cancel context.CancelFunc
 }
 
+type TerminalTaskObserver interface {
+	ObserveTerminalTask(ctx context.Context, task *taskdomain.Task, events []*taskdomain.Event) error
+}
+
 type Service struct {
-	store          taskdomain.Store
-	bus            bus.Bus
-	logger         logging.Logger
-	subscribeMu    sync.Once
-	executionMu    sync.Mutex
-	executions     map[string]*executionState
-	cancelledMu    sync.RWMutex
-	cancelled      map[string]struct{}
-	listenersMu    sync.RWMutex
-	listeners      map[string]map[uint64]chan Update
-	nextListenerID uint64
+	store            taskdomain.Store
+	bus              bus.Bus
+	workflow         *workflowusecase.Dispatcher
+	transitions      *workflowusecase.TransitionRegistry
+	logger           logging.Logger
+	subscribeMu      sync.Once
+	executionMu      sync.Mutex
+	executions       map[string]*executionState
+	cancelledMu      sync.RWMutex
+	cancelled        map[string]struct{}
+	listenersMu      sync.RWMutex
+	listeners        map[string]map[uint64]chan Update
+	nextListenerID   uint64
+	terminalObserver TerminalTaskObserver
 }
 
 func NewService(store taskdomain.Store, b bus.Bus, logger logging.Logger) *Service {
 	return &Service{
-		store:      store,
-		bus:        b,
+		store: store,
+		bus:   b,
+		workflow: workflowusecase.NewDispatcher(
+			workflowusecase.NewSequentialExecutor(b),
+			workflowusecase.NewParallelExecutor(b),
+			workflowusecase.NewLoopExecutor(b),
+			workflowusecase.NewCoordinatorExecutor(b),
+			workflowusecase.NewHierarchicalExecutor(b),
+			workflowusecase.NewReviewCritiqueExecutor(b),
+			workflowusecase.NewIterativeRefinementExecutor(b),
+		),
+		transitions: workflowusecase.NewTransitionRegistry(
+			workflowusecase.NewSequentialPolicy(),
+			workflowusecase.NewParallelPolicy(),
+			workflowusecase.NewLoopPolicy(),
+			workflowusecase.NewCoordinatorPolicy(),
+			workflowusecase.NewHierarchicalPolicy(),
+			workflowusecase.NewReviewCritiquePolicy(),
+			workflowusecase.NewIterativeRefinementPolicy(),
+		),
 		logger:     logger,
 		executions: make(map[string]*executionState),
 		cancelled:  make(map[string]struct{}),
 		listeners:  make(map[string]map[uint64]chan Update),
 	}
+}
+
+func (s *Service) SetTerminalTaskObserver(observer TerminalTaskObserver) {
+	s.terminalObserver = observer
 }
 
 func (s *Service) StartObservers(ctx context.Context) {
@@ -80,37 +113,50 @@ func (s *Service) StartObservers(ctx context.Context) {
 }
 
 func (s *Service) Submit(ctx context.Context, input SubmitInput) (*taskdomain.Task, error) {
+	input.Description = strings.TrimSpace(input.Description)
 	if input.Description == "" {
 		return nil, fmt.Errorf("task description is required")
 	}
 
+	input.Mode = strings.TrimSpace(input.Mode)
 	if input.Mode == "" {
 		input.Mode = "agent"
 	}
 	if input.Mode != "agent" {
 		return nil, fmt.Errorf("unsupported task mode: %s", input.Mode)
 	}
+	input.Source = strings.TrimSpace(input.Source)
 	if input.Source == "" {
 		input.Source = "api"
 	}
+	input.WorkflowPattern = taskdomain.NormalizeWorkflowPattern(input.WorkflowPattern)
+	if !taskdomain.IsValidWorkflowPattern(input.WorkflowPattern) {
+		return nil, fmt.Errorf("%w: %s", ErrWorkflowPatternInvalid, input.WorkflowPattern)
+	}
+	if s.workflow == nil || !s.workflow.Supports(input.WorkflowPattern) || s.transitions == nil || !s.transitions.Supports(input.WorkflowPattern) {
+		return nil, fmt.Errorf("%w: %s", ErrWorkflowPatternNotImplemented, input.WorkflowPattern)
+	}
+	input.OrgID = strings.TrimSpace(input.OrgID)
 	if input.OrgID == "" {
 		input.OrgID = "default"
 	}
 	if input.Attempt <= 0 {
 		input.Attempt = 1
 	}
+	input.Input = taskdomain.NormalizeTaskInput(input.WorkflowPattern, input.Input)
 
 	t := &taskdomain.Task{
-		ID:           uuid.New().String(),
-		ParentTaskID: input.ParentTaskID,
-		Attempt:      input.Attempt,
-		Source:       input.Source,
-		Mode:         input.Mode,
-		Description:  input.Description,
-		Input:        input.Input,
-		Status:       taskdomain.StatusQueued,
-		TraceID:      input.TraceID,
-		CurrentStage: "queued",
+		ID:              uuid.New().String(),
+		ParentTaskID:    input.ParentTaskID,
+		Attempt:         input.Attempt,
+		Source:          input.Source,
+		Mode:            input.Mode,
+		WorkflowPattern: input.WorkflowPattern,
+		Description:     input.Description,
+		Input:           input.Input,
+		Status:          taskdomain.StatusQueued,
+		TraceID:         input.TraceID,
+		CurrentStage:    "queued",
 	}
 
 	if err := s.store.Create(ctx, t); err != nil {
@@ -123,39 +169,61 @@ func (s *Service) Submit(ctx context.Context, input SubmitInput) (*taskdomain.Ta
 		TaskID: t.ID,
 		Type:   "task.submitted",
 		Payload: map[string]any{
-			"description":    input.Description,
-			"source":         input.Source,
-			"mode":           input.Mode,
-			"attempt":        input.Attempt,
-			"parent_task_id": input.ParentTaskID,
+			"description":      input.Description,
+			"source":           input.Source,
+			"mode":             input.Mode,
+			"workflow_pattern": input.WorkflowPattern,
+			"attempt":          input.Attempt,
+			"parent_task_id":   input.ParentTaskID,
 		},
 	}
 	if err := s.store.AppendEvent(ctx, submittedEvent); err != nil {
 		return nil, err
 	}
 
-	t.Status = taskdomain.StatusRunning
-	t.CurrentStage = "supervisor"
+	initialState, ok := s.transitions.InitialState(t.WorkflowPattern)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrWorkflowPatternNotImplemented, t.WorkflowPattern)
+	}
+	t.Status = initialState.Status
+	t.CurrentStage = initialState.CurrentStage
+	t.FinalOutput = initialState.FinalOutput
+	t.ErrorSummary = initialState.ErrorSummary
 	if err := s.store.Update(ctx, t); err != nil {
 		return nil, err
 	}
 
 	s.publishUpdate(t, submittedEvent)
 
-	if s.bus != nil {
-		s.bus.Publish(ctx, agentdomain.Message{
-			ID:        t.ID,
-			From:      input.Source,
-			To:        "supervisor",
-			Type:      "task",
-			Timestamp: time.Now(),
+	if err := s.workflow.Execute(ctx, t, workflowusecase.LaunchInput{
+		Source: input.Source,
+		OrgID:  input.OrgID,
+	}); err != nil {
+		t.Status = taskdomain.StatusFailed
+		t.CurrentStage = "failed"
+		t.ErrorSummary = err.Error()
+		if updateErr := s.store.Update(ctx, t); updateErr != nil {
+			return nil, updateErr
+		}
+
+		dispatchEvent := &taskdomain.Event{
+			TaskID: t.ID,
+			Type:   "task.dispatch_failed",
 			Payload: map[string]any{
-				"description": input.Description,
-				"org_id":      input.OrgID,
-				"trace_id":    input.TraceID,
-				"task_id":     t.ID,
+				"workflow_pattern": t.WorkflowPattern,
+				"error":            err.Error(),
 			},
-		})
+		}
+		if appendErr := s.store.AppendEvent(ctx, dispatchEvent); appendErr != nil && s.logger != nil {
+			s.logger.Error(ctx, "failed to append dispatch failure event",
+				logging.String("task_id", t.ID),
+				logging.Err(appendErr),
+			)
+		}
+
+		s.finishExecution(t.ID, t.Status)
+		s.publishUpdate(t, dispatchEvent)
+		return nil, err
 	}
 
 	return t, nil
@@ -241,13 +309,14 @@ func (s *Service) Retry(ctx context.Context, id string) (*taskdomain.Task, error
 	input["retry_status"] = original.Status
 
 	retriedTask, err := s.Submit(ctx, SubmitInput{
-		ParentTaskID: original.ID,
-		Attempt:      original.Attempt + 1,
-		Source:       "task_retry",
-		Mode:         original.Mode,
-		Description:  original.Description,
-		Input:        input,
-		TraceID:      original.TraceID,
+		ParentTaskID:    original.ID,
+		Attempt:         original.Attempt + 1,
+		Source:          "task_retry",
+		Mode:            original.Mode,
+		WorkflowPattern: original.WorkflowPattern,
+		Description:     original.Description,
+		Input:           input,
+		TraceID:         original.TraceID,
 	})
 	if err != nil {
 		return nil, err
@@ -412,6 +481,7 @@ func (s *Service) handleMessage(msg agentdomain.Message) {
 	if err != nil {
 		return
 	}
+	wasTerminal := isTerminalStatus(t.Status)
 
 	event := &taskdomain.Event{
 		TaskID:    taskID,
@@ -439,46 +509,7 @@ func (s *Service) handleMessage(msg agentdomain.Message) {
 		return
 	}
 
-	switch msg.Type {
-	case "task":
-		t.Status = taskdomain.StatusRunning
-		t.CurrentStage = "supervisor"
-	case "task_plan_request":
-		t.Status = taskdomain.StatusRunning
-		t.CurrentStage = "planner"
-	case "instruction":
-		t.Status = taskdomain.StatusRunning
-		t.CurrentStage = "coder"
-	case "review_request":
-		t.Status = taskdomain.StatusReviewing
-		t.CurrentStage = "reviewer"
-	case "review_result":
-		approved, _ := msg.Payload["approved"].(bool)
-		if approved {
-			t.Status = taskdomain.StatusReviewing
-			t.CurrentStage = "approved"
-		} else {
-			t.Status = taskdomain.StatusRunning
-			t.CurrentStage = "coder"
-		}
-	case "work_progress":
-		t.Status = taskdomain.StatusRunning
-		if msg.From != "" {
-			t.CurrentStage = msg.From
-		}
-	case "final_report":
-		t.Status = taskdomain.StatusCompleted
-		t.CurrentStage = "completed"
-		if result, ok := msg.Payload["result"].(string); ok {
-			t.FinalOutput = result
-		}
-	case agentdomain.TypeSystemAlert:
-		t.Status = taskdomain.StatusFailed
-		t.CurrentStage = "failed"
-		if message, ok := msg.Payload["message"].(string); ok {
-			t.ErrorSummary = message
-		}
-	}
+	_ = s.transitions.Apply(t, msg)
 
 	if traceID, ok := msg.Payload["trace_id"].(string); ok && traceID != "" {
 		t.TraceID = traceID
@@ -489,11 +520,36 @@ func (s *Service) handleMessage(msg agentdomain.Message) {
 		return
 	}
 
+	if !wasTerminal && isTerminalStatus(t.Status) {
+		s.observeTerminalTask(ctx, t)
+	}
 	if isTerminalStatus(t.Status) {
 		s.finishExecution(t.ID, t.Status)
 	}
 
 	s.publishUpdate(t, event)
+}
+
+func (s *Service) observeTerminalTask(ctx context.Context, task *taskdomain.Task) {
+	if s.terminalObserver == nil || task == nil {
+		return
+	}
+	events, err := s.store.ListEvents(ctx, task.ID, 500)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Error(ctx, "failed to load task events for terminal observation",
+				logging.String("task_id", task.ID),
+				logging.Err(err),
+			)
+		}
+		return
+	}
+	if err := s.terminalObserver.ObserveTerminalTask(ctx, cloneTask(task), events); err != nil && s.logger != nil {
+		s.logger.Error(ctx, "failed to observe terminal task",
+			logging.String("task_id", task.ID),
+			logging.Err(err),
+		)
+	}
 }
 
 func (s *Service) taskIDFromMessage(msg agentdomain.Message) string {

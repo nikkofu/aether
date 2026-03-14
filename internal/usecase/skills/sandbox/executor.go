@@ -48,13 +48,17 @@ func ExecuteInSandbox(ctx context.Context, logger logging.Logger, ledger economy
 
 	// 3. 经济反馈与审计
 	if err != nil {
-		if ledger != nil { ledger.UpdateBalance(ctx, orgID, agentID, 0, -0.5) }
+		if ledger != nil {
+			ledger.UpdateBalance(ctx, orgID, agentID, 0, -0.5)
+		}
 		return nil, fmt.Errorf("沙箱隔离执行失败: %s", stderr.String())
 	}
 
 	if ledger != nil {
 		bonus := 0.0
-		if duration < 1*time.Second { bonus = 0.02 }
+		if duration < 1*time.Second {
+			bonus = 0.02
+		}
 		ledger.UpdateBalance(ctx, orgID, agentID, bonus, 0.5)
 		ledger.AddTransaction(ctx, economy.Transaction{
 			ID: uuid.New().String(), OrgID: orgID, From: "system_sandbox", To: agentID, Amount: bonus, Type: "reward",

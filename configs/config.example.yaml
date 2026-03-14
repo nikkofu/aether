@@ -16,7 +16,7 @@ runtime:
 # 本地 LLM (默认优先)
 ollama:
   base_url: "http://localhost:11434"
-  model: "qwen3.5:0.8b"
+  model: "gemma3:270m"
   temperature: 0.7
   timeout: 300s
 

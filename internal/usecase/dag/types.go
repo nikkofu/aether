@@ -88,7 +88,7 @@ func (p *Pipeline) ToMermaid() string {
 
 	var mermaid string
 	mermaid += "graph TD\n"
-	
+
 	// 渲染所有节点
 	for _, node := range p.Nodes {
 		// 为了视觉美观，将 Skill 加上方括号作为节点的显示文本
@@ -105,4 +105,3 @@ func (p *Pipeline) ToMermaid() string {
 
 	return mermaid
 }
-

@@ -22,7 +22,7 @@ func (g *SkillGenerator) GeneratePrototype(ctx context.Context, name, descriptio
 	// 逻辑：
 	// 1. 调用 LLM 生成 WASM 源代码或核心配置
 	// 2. 将其编译为 WASM (本地或通过远程服务)
-	
+
 	s := &domain_skills.Skill{
 		ID:          "skill-" + fmt.Sprintf("%d", time.Now().Unix()),
 		Name:        name,

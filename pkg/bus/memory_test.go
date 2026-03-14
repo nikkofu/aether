@@ -115,6 +115,31 @@ func (a *delayedResponseAgent) Handle(ctx context.Context, msg agentdomain.Messa
 	}}, nil
 }
 
+type countingAgent struct {
+	name string
+	role string
+	hits chan agentdomain.Message
+}
+
+func (a *countingAgent) Name() string               { return a.name }
+func (a *countingAgent) Role() string               { return a.role }
+func (a *countingAgent) Status() agentdomain.Status { return agentdomain.StatusRunning }
+func (a *countingAgent) Spawn(ctx context.Context, role string, payload map[string]any) (string, error) {
+	return "", nil
+}
+func (a *countingAgent) Shutdown(ctx context.Context) error { return nil }
+func (a *countingAgent) SetBus(b agentdomain.Bus)           {}
+func (a *countingAgent) SetStatus(s agentdomain.Status)     {}
+func (a *countingAgent) Metadata() map[string]any           { return nil }
+
+func (a *countingAgent) Handle(ctx context.Context, msg agentdomain.Message) ([]agentdomain.Message, error) {
+	select {
+	case a.hits <- msg:
+	default:
+	}
+	return nil, nil
+}
+
 func TestMemoryBusTaskCancellation(t *testing.T) {
 	t.Run("cancels active handler context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -206,4 +231,48 @@ func TestMemoryBusTaskCancellation(t *testing.T) {
 		case <-time.After(250 * time.Millisecond):
 		}
 	})
+}
+
+func TestMemoryBusRoutesOnlyToExplicitRecipient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	b := NewMemoryBus(16)
+	supervisor := &countingAgent{
+		name: "supervisor",
+		role: "supervisor",
+		hits: make(chan agentdomain.Message, 1),
+	}
+	coder := &countingAgent{
+		name: "coder",
+		role: "coder",
+		hits: make(chan agentdomain.Message, 1),
+	}
+
+	b.Subscribe(supervisor)
+	b.Subscribe(coder)
+	go b.Start(ctx)
+
+	b.Publish(ctx, agentdomain.Message{
+		ID:        "task-routing",
+		From:      "planner",
+		To:        "coder",
+		Type:      "instruction",
+		Timestamp: time.Now(),
+		Payload: map[string]any{
+			"task_id": "task-routing",
+		},
+	})
+
+	select {
+	case <-coder.hits:
+	case <-time.After(time.Second):
+		t.Fatal("expected explicit recipient to receive the message")
+	}
+
+	select {
+	case msg := <-supervisor.hits:
+		t.Fatalf("did not expect supervisor to receive %s routed to coder", msg.Type)
+	case <-time.After(200 * time.Millisecond):
+	}
 }

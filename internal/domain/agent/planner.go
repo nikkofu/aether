@@ -88,13 +88,21 @@ Observation: 定义每个模块的成功交付标准。
 			return nil, fmt.Errorf("LLM did not return a valid plan string")
 		}
 
-		// 5. 生成后续指令（如果 Manager 已注入）
-		// 注意：即便没有 Manager，我们也返回成功的消息列表，让总线继续流转
+		deliveryTarget := "coder"
+		if target, ok := msg.Payload["delivery_target"].(string); ok && target != "" {
+			deliveryTarget = target
+		}
+		deliveryType := "instruction"
+		if typed, ok := msg.Payload["delivery_type"].(string); ok && typed != "" {
+			deliveryType = typed
+		}
+
+		// Planner 只负责生成计划并按工作流显式投递，不在 Agent 内部隐式决定后续编排。
 		resMsg := Message{
 			ID:        msg.ID,
 			From:      a.name,
-			To:        "coder",
-			Type:      "instruction",
+			To:        deliveryTarget,
+			Type:      deliveryType,
 			Timestamp: time.Now(),
 			Payload: map[string]any{
 				"plan":     plan,
@@ -102,11 +110,6 @@ Observation: 定义每个模块的成功交付标准。
 				"task_id":  taskID,
 				"trace_id": msg.Payload["trace_id"],
 			},
-		}
-
-		// 如果 Manager 存在，则尝试 Spawn 一个 Coder
-		if a.manager != nil {
-			_, _ = a.manager.Spawn(ctx, "coder", map[string]any{"task_id": taskID, "plan": plan})
 		}
 
 		return []Message{resMsg}, nil

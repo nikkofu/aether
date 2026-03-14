@@ -62,10 +62,16 @@ func (t *ABTester) RunABTest(ctx context.Context, skillAID, skillBID string, sam
 	rateA := float64(statsA.SuccessCount) / float64(sampleSize)
 	rateB := float64(statsB.SuccessCount) / float64(sampleSize)
 
-	if rateA > rateB { return skillAID, nil }
-	if rateB > rateA { return skillBID, nil }
+	if rateA > rateB {
+		return skillAID, nil
+	}
+	if rateB > rateA {
+		return skillBID, nil
+	}
 
 	// 成功率相同时，对比平均耗时
-	if statsA.TotalTime < statsB.TotalTime { return skillAID, nil }
+	if statsA.TotalTime < statsB.TotalTime {
+		return skillAID, nil
+	}
 	return skillBID, nil
 }

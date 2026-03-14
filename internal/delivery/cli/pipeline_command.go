@@ -11,8 +11,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/nikkofu/aether/internal/usecase/dag"
 	"github.com/nikkofu/aether/internal/app"
+	"github.com/nikkofu/aether/internal/usecase/dag"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -134,7 +134,7 @@ func (h *PipelineHandler) runPipeline(ctx context.Context, args []string) {
 
 	// 6. 执行流水线
 	results, err := executor.Execute(ctx, &pipeline)
-	
+
 	// 等待事件监听协程处理完所有剩余事件
 	wg.Wait()
 
